@@ -2,6 +2,8 @@
 
 Core routing is platform-neutral. It matches normalized text and action fields from `InboundEventInterface`.
 
+If you are using this through `chatflowphp/telegram`, register routes on `ChatFlow\Telegram\Bot` or a flow that targets `FlowRuntimeInterface`. You do not need to work with raw `Application` for normal product bots.
+
 ## Route Methods
 
 Available through `Application`, `FlowRuntimeInterface` and adapter facades:

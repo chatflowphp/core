@@ -2,6 +2,8 @@
 
 `View` is the platform-neutral outgoing UI model.
 
+If you are using this through `chatflowphp/telegram`, keep this page for the shared effect model and read Telegram docs for delivery details such as edit-or-send fallbacks and callback acknowledgements.
+
 ## View
 
 ```php
@@ -59,6 +61,8 @@ Context methods queue effects:
 - `ack()` -> `AckEffect`
 
 Adapters deliver those effects.
+
+The effect semantics are core-level. The actual wire behavior is adapter-specific.
 
 ## Delivery Result
 

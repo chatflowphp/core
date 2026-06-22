@@ -2,6 +2,8 @@
 
 Scenes implement dialog state.
 
+If you are using this through `chatflowphp/telegram`, `BaseScene` is the only scene abstraction most bot authors need. You do not need lower-level FSM internals to build normal Telegram dialogs.
+
 Extend `BaseScene`:
 
 ```php

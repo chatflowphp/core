@@ -16,6 +16,22 @@ The core is responsible for:
 
 The core is not responsible for Telegram Bot API calls, webhook parsing, polling, callback payload token storage, media group collection or Telegram-specific rendering behavior. Those belong to `chatflowphp/telegram`.
 
+## Using This Through `chatflowphp/telegram`?
+
+If you are writing a Telegram bot, start in the `chatflowphp/telegram` docs and use core only as a curated reference.
+
+Read this subset first:
+
+1. [Context](context.md)
+2. [Routing](routing.md)
+3. [Views And Effects](views-effects.md)
+4. [Scenes](scenes.md)
+5. [Storage](storage.md)
+6. [Validation](validation.md)
+7. [Testing](testing.md)
+
+Treat [Architecture](architecture.md) and [Application Runtime](application.md) as optional internals unless you are extending adapters or debugging the runtime itself.
+
 ## Reading Order
 
 1. [Architecture](architecture.md)

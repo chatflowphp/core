@@ -11,6 +11,22 @@ It contains routing, middleware, scenes/FSM, sessions, validation, normalized in
 
 Full package documentation starts at [docs/index.md](docs/index.md). Use [docs/ai-index.md](docs/ai-index.md) as compact context for AI-assisted flow implementation tasks.
 
+## Using This Through `chatflowphp/telegram`?
+
+If you are building a Telegram bot, keep `chatflowphp/telegram` as the main onboarding surface.
+
+Read only this subset from core unless you are extending the runtime itself:
+
+1. [Context](docs/context.md)
+2. [Routing](docs/routing.md)
+3. [Views And Effects](docs/views-effects.md)
+4. [Scenes](docs/scenes.md)
+5. [Storage](docs/storage.md)
+6. [Validation](docs/validation.md)
+7. [Testing](docs/testing.md)
+
+`Architecture`, `Application Runtime` and adapter internals are optional for normal product bot development.
+
 ## Runtime Model
 
 Adapters convert platform input into `InboundEvent` with typed refs:
