@@ -1,5 +1,10 @@
 # ChatFlow Core
 
+[![CI](https://github.com/chatflowphp/core/actions/workflows/ci.yml/badge.svg)](https://github.com/chatflowphp/core/actions/workflows/ci.yml)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%20max-brightgreen.svg)](https://phpstan.org/)
+[![PHPUnit](https://img.shields.io/badge/PHPUnit-tested-brightgreen.svg)](https://phpunit.de/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 `chatflowphp/core` is the platform-neutral runtime for chat workflows.
 
 It contains routing, middleware, scenes/FSM, sessions, validation, normalized inbound events and platform-neutral outgoing views. It does not depend on Telegram or any other transport SDK.
