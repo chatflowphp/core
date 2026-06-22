@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.2', '8.3', '8.4']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout Automata dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          repo="https://github.com/chatflowphp/automata.git"
+
+          if git ls-remote --exit-code --heads "$repo" "$ref" >/dev/null 2>&1; then
+            git clone --depth=1 --branch "$ref" "$repo" ../chatflow-automata
+          else
+            git clone --depth=1 "$repo" ../chatflow-automata
+          fi
+
+          composer config repositories.chatflowphp-automata '{"type":"path","url":"../chatflow-automata","options":{"symlink":false,"versions":{"chatflowphp/automata":"1.0.0"}}}'
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ matrix.php-version }}-${{ hashFiles('composer.json') }}
+          restore-keys: ${{ runner.os }}-php-${{ matrix.php-version }}-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Static analysis and tests
+        run: composer check
+
+      - name: Coding standards
+        run: composer cs-check

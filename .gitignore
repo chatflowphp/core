@@ -1,0 +1,14 @@
+# Composer
+/vendor/
+composer.lock
+
+# Runtime data
+/storage/
+/var/
+
+# Tool caches
+.php-cs-fixer.cache
+.phpunit.result.cache
+
+# Environment variables
+.env
