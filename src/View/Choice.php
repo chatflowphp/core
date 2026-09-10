@@ -6,17 +6,25 @@ namespace ChatFlow\View;
 
 use ChatFlow\Support\SerializableValueValidator;
 
+/**
+ * A quick-reply option: pressing it sends its value as a text message.
+ */
 final class Choice
 {
+    /**
+     * @var array<string, mixed>
+     */
+    private readonly array $meta;
+
     /**
      * @param array<string, mixed> $meta
      */
     public function __construct(
         private readonly string $label,
         private readonly string $value,
-        private readonly array $meta = [],
+        array $meta = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->meta, 'choice meta');
+        $this->meta = SerializableValueValidator::normalizeMap($meta, 'choice meta');
     }
 
     public function getLabel(): string
@@ -34,6 +42,6 @@ final class Choice
      */
     public function getMeta(): array
     {
-        return SerializableValueValidator::normalizeMap($this->meta, 'choice meta');
+        return $this->meta;
     }
 }

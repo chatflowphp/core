@@ -19,9 +19,9 @@ final class JsonlRuntimeObserver implements RuntimeObserverInterface
             throw new InvalidArgumentException('Runtime log file path must be a non-empty string.');
         }
 
-        $directory = dirname($this->filePath);
+        $directory = \dirname($this->filePath);
         if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
-            throw new RuntimeException(sprintf('Unable to create runtime log directory "%s".', $directory));
+            throw new RuntimeException(\sprintf('Unable to create runtime log directory "%s".', $directory));
         }
     }
 
@@ -34,7 +34,7 @@ final class JsonlRuntimeObserver implements RuntimeObserverInterface
 
         $line = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . PHP_EOL;
         if (file_put_contents($this->filePath, $line, FILE_APPEND | LOCK_EX) === false) {
-            throw new RuntimeException(sprintf('Unable to write runtime log file "%s".', $this->filePath));
+            throw new RuntimeException(\sprintf('Unable to write runtime log file "%s".', $this->filePath));
         }
     }
 }

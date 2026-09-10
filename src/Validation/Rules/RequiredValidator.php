@@ -17,12 +17,12 @@ class RequiredValidator implements ValidatorInterface
             return false;
         }
 
-        if (!is_string($value) && !is_numeric($value)) {
+        if (!\is_string($value) && !is_numeric($value)) {
             return false;
         }
 
         /** @var string $valueStr */
-        $valueStr = is_string($value) ? $value : (string) $value;
+        $valueStr = \is_string($value) ? $value : (string) $value;
 
         return trim($valueStr) !== '';
     }

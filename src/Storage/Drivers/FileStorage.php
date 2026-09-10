@@ -6,220 +6,185 @@ namespace ChatFlow\Storage\Drivers;
 
 use ChatFlow\Exception\StorageException;
 use ChatFlow\Storage\StorageInterface;
+use JsonException;
 
 /**
- * File-based storage driver with atomic writes and file locking
- * Stores session data as JSON files in storage/sessions/ directory.
+ * One JSON file per key with an exclusive lock per key and atomic writes (temporary file, fsync,
+ * rename). Suitable for local development and small single-host bots.
  */
 class FileStorage implements StorageInterface
 {
-    private const LOCK_TIMEOUT = 30;
+    private const LOCK_TIMEOUT_SECONDS = 30;
 
     public function __construct(private readonly string $storagePath)
     {
-        $this->ensureDirectoryExists();
+        $this->ensureDirectory($this->storagePath . '/records');
+        $this->ensureDirectory($this->storagePath . '/locks');
     }
 
-    private function ensureDirectoryExists(): void
+    public function get(string $key): ?array
     {
-        $sessionsDir = $this->storagePath . '/sessions';
-        if (!is_dir($sessionsDir)) {
-            mkdir($sessionsDir, 0755, true);
-        }
-
-        $locksDir = $this->storagePath . '/locks';
-        if (!is_dir($locksDir)) {
-            mkdir($locksDir, 0755, true);
-        }
-    }
-
-    private function getFilePath(string $conversationId): string
-    {
-        $safeConversationId = preg_replace('/[^a-zA-Z0-9_-]/', '_', $conversationId) ?? $conversationId;
-
-        return $this->storagePath . '/sessions/' . $safeConversationId . '.json';
-    }
-
-    private function getLockFilePath(string $conversationId): string
-    {
-        $safeConversationId = preg_replace('/[^a-zA-Z0-9_-]/', '_', $conversationId) ?? $conversationId;
-
-        return $this->storagePath . '/locks/' . $safeConversationId . '.lock';
-    }
-
-    /**
-     * Acquire exclusive lock for the given chat ID.
-     *
-     * @return resource
-     *
-     * @throws StorageException If lock file creation fails or timeout occurs
-     */
-    private function acquireLock(string $conversationId)
-    {
-        $lockFilePath = $this->getLockFilePath($conversationId);
-        $lockFile = fopen($lockFilePath, 'w+');
-
-        if ($lockFile === false) {
-            throw new StorageException("Failed to create lock file for conversation {$conversationId}");
-        }
-
-        $startTime = time();
-        while (!flock($lockFile, LOCK_EX | LOCK_NB)) {
-            if (time() - $startTime >= self::LOCK_TIMEOUT) {
-                fclose($lockFile);
-                throw new StorageException("Failed to acquire lock for conversation {$conversationId} within " . self::LOCK_TIMEOUT . ' seconds');
-            }
-            usleep(100000);
-        }
-
-        return $lockFile;
-    }
-
-    /** @param resource $lockFile */
-    private function releaseLock($lockFile): void
-    {
-        if (is_resource($lockFile)) {
-            flock($lockFile, LOCK_UN);
-            fclose($lockFile);
-        }
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     *
-     * @throws StorageException If file I/O or JSON operation fails
-     */
-    public function get(string $conversationId): ?array
-    {
-        $lockFile = $this->acquireLock($conversationId);
+        $lock = $this->acquireLock($key);
 
         try {
-            $filePath = $this->getFilePath($conversationId);
+            $path = $this->recordPath($key);
 
-            if (!file_exists($filePath)) {
+            if (!is_file($path)) {
                 return null;
             }
 
-            $content = file_get_contents($filePath);
-            if ($content === false) {
-                return null;
-            }
-
-            /** @var mixed $data */
-            $data = json_decode($content, true);
-
-            if (!is_array($data) || json_last_error() !== JSON_ERROR_NONE) {
-                return null;
-            }
-
-            /** @var array<string, mixed> $result */
-            $result = $data;
-
-            return $result;
-        } finally {
-            $this->releaseLock($lockFile);
-        }
-    }
-
-    /**
-     * Save session data atomically.
-     *
-     * Strategy:
-     * 1. Acquire Lock.
-     * 2. Write to a temporary file (.tmp).
-     * 3. Force flush to disk (fsync).
-     * 4. Rename .tmp to actual file (atomic operation on POSIX filesystems).
-     * 5. Release Lock.
-     *
-     * @param array<string, mixed> $data
-     *
-     * @throws StorageException If writing or renaming fails
-     */
-    public function save(string $conversationId, array $data): void
-    {
-        $lockFile = $this->acquireLock($conversationId);
-
-        try {
-            $filePath = $this->getFilePath($conversationId);
-            $tempFilePath = $filePath . '.tmp';
-
-            $normalizedData = $this->normalizeDataFormat($data);
-
-            $content = json_encode($normalizedData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            $content = file_get_contents($path);
 
             if ($content === false) {
-                throw new StorageException('Failed to encode session data');
+                throw new StorageException(\sprintf('Failed to read record "%s".', $key));
             }
 
-            $result = file_put_contents($tempFilePath, $content, LOCK_EX);
-            if ($result === false) {
-                throw new StorageException('Failed to write temporary session data');
+            try {
+                $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                return null;
             }
 
-            if (function_exists('fsync')) {
-                $tempHandle = fopen($tempFilePath, 'r');
-                if ($tempHandle !== false) {
-                    fsync($tempHandle);
-                    fclose($tempHandle);
-                }
-            }
-
-            if (!rename($tempFilePath, $filePath)) {
-                @unlink($tempFilePath);
-                throw new StorageException('Failed to rename temporary file to session file');
-            }
+            return \is_array($decoded) ? self::stringKeys($decoded) : null;
         } finally {
-            $this->releaseLock($lockFile);
+            $this->releaseLock($lock);
         }
     }
 
-    /**
-     * @param array<string, mixed> $data
-     *
-     * @return array<string, mixed>
-     */
-    private function normalizeDataFormat(array $data): array
+    public function save(string $key, array $data): void
     {
-        if (isset($data['meta']) && isset($data['data'])) {
-            return $data;
-        }
-
-        $conversationId = $data['conversation_id'] ?? ($data['chat_id'] ?? '');
-
-        return [
-            'meta' => [
-                'conversation_id' => $conversationId,
-                'current_scene' => $data['current_scene'] ?? null,
-                'updated_at' => time(),
-            ],
-            'data' => $data,
-        ];
-    }
-
-    public function delete(string $conversationId): void
-    {
-        $lockFile = $this->acquireLock($conversationId);
+        $lock = $this->acquireLock($key);
 
         try {
-            $filePath = $this->getFilePath($conversationId);
+            $path = $this->recordPath($key);
+            $temporary = $path . '.' . bin2hex(random_bytes(4)) . '.tmp';
 
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            try {
+                $content = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            } catch (JsonException $e) {
+                throw new StorageException('Failed to encode record: ' . $e->getMessage(), 0, $e);
+            }
+
+            $handle = fopen($temporary, 'w');
+
+            if ($handle === false) {
+                throw new StorageException(\sprintf('Failed to create temporary file for record "%s".', $key));
+            }
+
+            $written = fwrite($handle, $content);
+            fflush($handle);
+            fsync($handle);
+            fclose($handle);
+
+            if ($written === false || !rename($temporary, $path)) {
+                @unlink($temporary);
+
+                throw new StorageException(\sprintf('Failed to write record "%s".', $key));
             }
         } finally {
-            $this->releaseLock($lockFile);
+            $this->releaseLock($lock);
         }
     }
 
-    public function exists(string $conversationId): bool
+    public function delete(string $key): void
     {
-        $filePath = $this->getFilePath($conversationId);
+        $lock = $this->acquireLock($key);
 
-        return file_exists($filePath);
+        try {
+            $path = $this->recordPath($key);
+
+            if (is_file($path)) {
+                unlink($path);
+            }
+        } finally {
+            $this->releaseLock($lock);
+        }
+    }
+
+    public function exists(string $key): bool
+    {
+        return is_file($this->recordPath($key));
     }
 
     public function getStoragePath(): string
     {
         return $this->storagePath;
+    }
+
+    private function recordPath(string $key): string
+    {
+        return $this->storagePath . '/records/' . self::safeName($key) . '.json';
+    }
+
+    /**
+     * @return resource
+     *
+     * @throws StorageException
+     */
+    private function acquireLock(string $key)
+    {
+        $lockPath = $this->storagePath . '/locks/' . self::safeName($key) . '.lock';
+        $lock = fopen($lockPath, 'c');
+
+        if ($lock === false) {
+            throw new StorageException(\sprintf('Failed to open lock file for record "%s".', $key));
+        }
+
+        $startedAt = time();
+
+        while (!flock($lock, LOCK_EX | LOCK_NB)) {
+            if (time() - $startedAt >= self::LOCK_TIMEOUT_SECONDS) {
+                fclose($lock);
+
+                throw new StorageException(\sprintf(
+                    'Failed to acquire lock for record "%s" within %d seconds.',
+                    $key,
+                    self::LOCK_TIMEOUT_SECONDS,
+                ));
+            }
+
+            usleep(50_000);
+        }
+
+        return $lock;
+    }
+
+    /**
+     * @param resource $lock
+     */
+    private function releaseLock($lock): void
+    {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+
+    private function ensureDirectory(string $directory): void
+    {
+        if (!is_dir($directory) && !mkdir($directory, 0o755, true) && !is_dir($directory)) {
+            throw new StorageException(\sprintf('Failed to create storage directory "%s".', $directory));
+        }
+    }
+
+    private static function safeName(string $key): string
+    {
+        $safe = (string) preg_replace('/[^A-Za-z0-9_-]/', '_', $key);
+
+        return $safe . '_' . substr(hash('sha256', $key), 0, 12);
+    }
+
+    /**
+     * @param array<array-key, mixed> $decoded
+     *
+     * @return array<string, mixed>
+     */
+    private static function stringKeys(array $decoded): array
+    {
+        $record = [];
+
+        foreach ($decoded as $key => $value) {
+            $record[(string) $key] = $value;
+        }
+
+        return $record;
     }
 }

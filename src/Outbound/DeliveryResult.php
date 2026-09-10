@@ -13,8 +13,7 @@ final class DeliveryResult
         private readonly bool $success,
         private readonly ?string $message = null,
         private readonly ?array $data = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @param array<string, mixed>|null $data

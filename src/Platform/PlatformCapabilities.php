@@ -17,8 +17,7 @@ final class PlatformCapabilities
         private readonly bool $ack,
         private readonly bool $attachmentDownload,
         private readonly array $extensions = [],
-    ) {
-    }
+    ) {}
 
     public function supportsActions(): bool
     {

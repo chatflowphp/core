@@ -10,9 +10,7 @@ use Throwable;
 
 class LoggerMiddleware implements MiddlewareInterface
 {
-    public function __construct(private LoggerInterface $logger)
-    {
-    }
+    public function __construct(private LoggerInterface $logger) {}
 
     public function process(Context $ctx, callable $next): mixed
     {

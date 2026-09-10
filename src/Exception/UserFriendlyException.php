@@ -9,6 +9,4 @@ use Throwable;
 /**
  * Marker interface for exceptions with messages safe for end-users.
  */
-interface UserFriendlyException extends Throwable
-{
-}
+interface UserFriendlyException extends Throwable {}

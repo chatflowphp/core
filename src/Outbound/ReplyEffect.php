@@ -10,8 +10,7 @@ final class ReplyEffect implements OutboundEffectInterface
 {
     public function __construct(
         private readonly View $view,
-    ) {
-    }
+    ) {}
 
     public function getType(): string
     {

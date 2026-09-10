@@ -11,9 +11,9 @@ class SceneNotFoundException extends BotException
     public function __construct(
         string $sceneClass,
         int $code = 0,
-        ?Throwable $previous = null
+        ?Throwable $previous = null,
     ) {
-        $message = sprintf('Scene "%s" not found in registry', $sceneClass);
+        $message = \sprintf('Scene "%s" not found in registry', $sceneClass);
         parent::__construct($message, $code, $previous);
     }
 }

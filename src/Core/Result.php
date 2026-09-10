@@ -13,8 +13,7 @@ class Result
         private readonly string $status,
         private readonly ?string $message = null,
         private readonly ?array $data = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @param array<string, mixed>|null $data

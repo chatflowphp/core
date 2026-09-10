@@ -9,9 +9,7 @@ use ChatFlow\Validation\ValidatorInterface;
 
 class CallbackValidator implements ValidatorInterface
 {
-    public function __construct(private mixed $callback = null)
-    {
-    }
+    public function __construct(private mixed $callback = null) {}
 
     public function setCallback(mixed $callback): void
     {
@@ -21,7 +19,7 @@ class CallbackValidator implements ValidatorInterface
     /**
      * Validate value using callback function.
      *
-     * @param mixed                $value      Value to validate
+     * @param mixed $value Value to validate
      * @param array<string, mixed> $parameters Validation parameters
      *
      * @return bool True if valid
@@ -44,7 +42,7 @@ class CallbackValidator implements ValidatorInterface
             throw new ValidationException('CallbackValidator requires a callback function');
         }
 
-        if (is_callable($callback)) {
+        if (\is_callable($callback)) {
             return (bool) $callback($value, $parameters);
         }
 

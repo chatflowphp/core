@@ -7,43 +7,45 @@ namespace ChatFlow\Storage\Drivers;
 use ChatFlow\Storage\StorageInterface;
 
 /**
- * In-memory storage driver.
- * Useful for testing and stateless environments.
- * Data is lost when the script terminates.
+ * In-process storage for tests and single-process bots. Data is lost when the script ends.
  */
 class MemoryStorage implements StorageInterface
 {
-    /** @var array<string, array<string, mixed>> */
-    private array $storage = [];
+    /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $records = [];
+
+    public function get(string $key): ?array
+    {
+        return $this->records[$key] ?? null;
+    }
+
+    public function save(string $key, array $data): void
+    {
+        $this->records[$key] = $data;
+    }
+
+    public function delete(string $key): void
+    {
+        unset($this->records[$key]);
+    }
+
+    public function exists(string $key): bool
+    {
+        return isset($this->records[$key]);
+    }
 
     /**
-     * @return array<string, mixed>|null
+     * @return list<string>
      */
-    public function get(string $conversationId): ?array
+    public function keys(): array
     {
-        return $this->storage[$conversationId] ?? null;
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    public function save(string $conversationId, array $data): void
-    {
-        $this->storage[$conversationId] = $data;
-    }
-
-    public function delete(string $conversationId): void
-    {
-        unset($this->storage[$conversationId]);
-    }
-
-    public function exists(string $conversationId): bool
-    {
-        return isset($this->storage[$conversationId]);
+        return array_keys($this->records);
     }
 
     public function clearAll(): void
     {
-        $this->storage = [];
+        $this->records = [];
     }
 }

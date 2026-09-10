@@ -14,6 +14,4 @@ use Psr\Container\NotFoundExceptionInterface;
  * PSR-11 NotFoundExceptionInterface for compatibility with PSR-11 compliant
  * containers.
  */
-class ServiceNotFoundException extends ContainerException implements NotFoundExceptionInterface
-{
-}
+class ServiceNotFoundException extends ContainerException implements NotFoundExceptionInterface {}

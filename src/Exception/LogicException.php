@@ -11,6 +11,4 @@ namespace ChatFlow\Exception;
  * such as invalid method calls in the current context, inconsistent state,
  * or other programming logic errors that should not occur in normal operation.
  */
-class LogicException extends BotException
-{
-}
+class LogicException extends BotException {}

@@ -6,6 +6,4 @@ namespace ChatFlow\Exception;
 
 use RuntimeException;
 
-final class UnsupportedCapabilityException extends RuntimeException implements ChatFlowException
-{
-}
+final class UnsupportedCapabilityException extends RuntimeException implements ChatFlowException {}

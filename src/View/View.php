@@ -6,22 +6,31 @@ namespace ChatFlow\View;
 
 use ChatFlow\Support\SerializableValueValidator;
 
+/**
+ * Platform-neutral description of an outgoing message: text, action rows, choice rows, media and
+ * adapter metadata. Immutable: every "with" and "add" method returns a new view.
+ */
 final class View
 {
     /**
-     * @param list<list<Action>>    $actions
-     * @param list<list<Choice>>    $choices
+     * @var array<string, mixed>
+     */
+    private readonly array $meta;
+
+    /**
+     * @param list<list<Action>> $actions
+     * @param list<list<Choice>> $choices
      * @param list<MediaAttachment> $media
-     * @param array<string, mixed>  $meta
+     * @param array<string, mixed> $meta
      */
     public function __construct(
         private readonly string $text = '',
         private readonly array $actions = [],
         private readonly array $choices = [],
         private readonly array $media = [],
-        private readonly array $meta = [],
+        array $meta = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->meta, 'view meta');
+        $this->meta = SerializableValueValidator::normalizeMap($meta, 'view meta');
     }
 
     public static function text(string $text): self
@@ -44,13 +53,7 @@ final class View
 
     public function addActionRow(Action ...$actions): self
     {
-        return new self(
-            $this->text,
-            [...$this->actions, $actions],
-            $this->choices,
-            $this->media,
-            $this->meta
-        );
+        return new self($this->text, [...$this->actions, array_values($actions)], $this->choices, $this->media, $this->meta);
     }
 
     /**
@@ -63,13 +66,7 @@ final class View
 
     public function addChoiceRow(Choice ...$choices): self
     {
-        return new self(
-            $this->text,
-            $this->actions,
-            [...$this->choices, $choices],
-            $this->media,
-            $this->meta
-        );
+        return new self($this->text, $this->actions, [...$this->choices, array_values($choices)], $this->media, $this->meta);
     }
 
     /**
@@ -82,13 +79,7 @@ final class View
 
     public function addMedia(MediaAttachment $attachment): self
     {
-        return new self(
-            $this->text,
-            $this->actions,
-            $this->choices,
-            [...$this->media, $attachment],
-            $this->meta
-        );
+        return new self($this->text, $this->actions, $this->choices, [...$this->media, $attachment], $this->meta);
     }
 
     /**
@@ -133,6 +124,6 @@ final class View
      */
     public function getMeta(): array
     {
-        return SerializableValueValidator::normalizeMap($this->meta, 'view meta');
+        return $this->meta;
     }
 }

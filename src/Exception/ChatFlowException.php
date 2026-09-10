@@ -6,6 +6,4 @@ namespace ChatFlow\Exception;
 
 use Throwable;
 
-interface ChatFlowException extends Throwable
-{
-}
+interface ChatFlowException extends Throwable {}

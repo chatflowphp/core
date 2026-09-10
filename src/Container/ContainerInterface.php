@@ -8,80 +8,52 @@ use ChatFlow\Exception\ContainerException;
 use Psr\Container\ContainerInterface as PsrContainerInterface;
 
 /**
- * Extended container interface supporting service registration and dependency injection methods.
- *
- * This interface decouples the framework from the concrete DI implementation.
+ * Container contract used by the runtime: PSR-11 lookup plus registration, invocation and a
+ * request scope that is flushed after every handled event.
  */
 interface ContainerInterface extends PsrContainerInterface
 {
     /**
-     * Register a binding with the container.
-     *
-     * @param string $id    Service identifier (usually class name or interface)
-     * @param mixed  $value The value or closure to bind
-     *
-     * @throws ContainerException
-     */
-    public function bind(string $id, mixed $value): void;
-
-    /**
-     * Set a service in the container (alias for bind).
-     *
-     * @param string $id    Service identifier
-     * @param mixed  $value The value or closure to bind
+     * Registers a value or an instance for the lifetime of the container.
      *
      * @throws ContainerException
      */
     public function set(string $id, mixed $value): void;
 
     /**
-     * Register a shared binding (singleton) in the container.
-     *
-     * @param string               $id       Service identifier
-     * @param string|callable|null $concrete Concrete class or closure (optional)
+     * Registers a value or an instance for the current request only. Cleared by flush().
+     */
+    public function scoped(string $id, mixed $value): void;
+
+    /**
+     * Registers a shared service built from a class name or a factory.
      *
      * @throws ContainerException
      */
     public function singleton(string $id, string|callable|null $concrete = null): void;
 
     /**
-     * Call the given callback and inject dependencies.
+     * Calls the callable, resolving parameters by type, by name and from the given overrides.
      *
-     * @param callable             $callable   Function or method to call
-     * @param array<string, mixed> $parameters Custom parameters to pass
-     *
-     * @return mixed The result of the callback
+     * @param array<string, mixed> $parameters
      *
      * @throws ContainerException
      */
     public function call(callable $callable, array $parameters = []): mixed;
 
     /**
-     * Resolve the given type from the container.
+     * Builds a new instance, applying container definitions for the class.
      *
-     * @param string               $className  Class name to instantiate
-     * @param array<string, mixed> $parameters Custom parameters to pass to the constructor
-     *
-     * @return mixed The instantiated object
+     * @param array<string, mixed> $parameters
      *
      * @throws ContainerException
      */
     public function make(string $className, array $parameters = []): mixed;
 
-    /**
-     * Check if the container can return an entry for the given identifier.
-     *
-     * @param string $id Identifier of the entry to look for
-     *
-     * @return bool
-     */
     public function has(string $id): bool;
 
     /**
-     * Flush runtime bindings.
-     *
-     * Should be called after every request/update cycle in long-polling mode
-     * to prevent state leakage between updates.
+     * Clears request-scoped registrations. Called by the runtime after each handled event.
      */
     public function flush(): void;
 }

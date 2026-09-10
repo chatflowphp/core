@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace ChatFlow\Core;
 
 use ChatFlow\Container\ContainerInterface;
+use ChatFlow\Contracts\FlowRuntimeInterface;
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Contracts\RuntimeDependencyBinderInterface;
 use ChatFlow\Exception\ErrorHandlerInterface;
-use ChatFlow\FSM\BaseScene;
-use ChatFlow\FSM\StateManager;
+use ChatFlow\Exception\ExceptionRegistry;
+use ChatFlow\Exception\LogicException;
 use ChatFlow\Middleware\MiddlewareInterface;
 use ChatFlow\Middleware\Pipeline;
 use ChatFlow\Observability\NullRuntimeObserver;
@@ -18,39 +19,77 @@ use ChatFlow\Observability\RuntimeEvent;
 use ChatFlow\Observability\RuntimeObserverInterface;
 use ChatFlow\Routing\Route;
 use ChatFlow\Routing\Router;
+use ChatFlow\Scene\Conversation;
+use ChatFlow\Scene\ConversationManager;
+use ChatFlow\Scene\Events\RouteHandled;
+use ChatFlow\Scene\Events\RouteMissed;
+use ChatFlow\Scene\RootScene;
+use ChatFlow\Scene\SceneRegistry;
+use ChatFlow\Scene\SceneTransitions;
 use ChatFlow\Validation\ValidationRegistry;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
 
-class Application
+/**
+ * The runtime: one inbound event becomes exactly one tick of the conversation's state machine.
+ *
+ * Order of work for every event: bind request dependencies, resume the conversation, match a
+ * route, run middleware around the tick, persist the conversation, deliver queued effects. When
+ * anything fails the conversation is rolled back, queued effects are dropped and only the error
+ * handler gets to reply.
+ */
+class Application implements FlowRuntimeInterface
 {
-    /** @var array<MiddlewareInterface|class-string<MiddlewareInterface>> */
+    /**
+     * @var list<MiddlewareInterface|class-string<MiddlewareInterface>>
+     */
     private array $middlewares = [];
+
+    private readonly Router $router;
+
+    private readonly ConversationManager $conversations;
+
+    private readonly ErrorHandlerInterface $errorHandler;
+
+    private readonly ValidationRegistry $validationRegistry;
+
+    private readonly LoggerInterface $logger;
+
+    private readonly RuntimeObserverInterface $runtimeObserver;
 
     public function __construct(
         private readonly PlatformAdapterInterface $adapter,
-        private readonly Router $router,
         private readonly ContainerInterface $container,
-        private readonly ErrorHandlerInterface $errorHandler,
-        private readonly ValidationRegistry $validationRegistry,
-        private readonly ?StateManager $stateManager = null,
+        ?Router $router = null,
+        ?ConversationManager $conversations = null,
+        ?ErrorHandlerInterface $errorHandler = null,
+        ?ValidationRegistry $validationRegistry = null,
         ?LoggerInterface $logger = null,
         ?RuntimeObserverInterface $runtimeObserver = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->runtimeObserver = $runtimeObserver ?? new NullRuntimeObserver();
+        $this->router = $router ?? new Router();
+        $this->validationRegistry = $validationRegistry ?? new ValidationRegistry($container);
+        $this->errorHandler = $errorHandler ?? new ExceptionRegistry($this->logger);
+        $this->conversations = $conversations ?? new ConversationManager(
+            new SceneRegistry($container),
+            $this->validationRegistry,
+            observer: $this->runtimeObserver,
+        );
+
         $this->container->set(ValidationRegistry::class, $this->validationRegistry);
+        $this->container->set(SceneRegistry::class, $this->conversations->getScenes());
+        $this->container->set(ConversationManager::class, $this->conversations);
     }
 
-    private LoggerInterface $logger;
-
-    private RuntimeObserverInterface $runtimeObserver;
-
-    public function handle(InboundEventInterface $event): Result
+    /**
+     * @param Route|null $route Handler chosen by the adapter; when given, the router is skipped.
+     */
+    public function handle(InboundEventInterface $event, ?Route $route = null): Result
     {
-        $context = new Context($event, $this->adapter, $this->container, $this->stateManager, runtimeObserver: $this->runtimeObserver);
-        $result = Result::noMatch();
+        $context = new Context($event, $this->adapter, $this->container, $this->runtimeObserver);
         $this->record('inbound.received', $event->getConversationId(), [
             'is_action' => $event->isAction(),
             'action_id' => $event->getActionId(),
@@ -60,28 +99,33 @@ class Application
         try {
             $this->bindRuntimeDependencies($context);
 
-            if ($this->stateManager !== null) {
-                $session = $this->stateManager->loadSession($event->getConversationId());
-                $context->setSession($session);
-                $this->stateManager->applyPendingTransitions($context);
+            $conversation = $this->conversations->resume($event->getConversationId());
+            $context->attachConversation($conversation);
+
+            $route ??= $this->router->match($event);
+            $this->recordTarget($context, $conversation, $route);
+
+            $ticked = false;
+            $result = (new Pipeline($this->container))
+                ->send($context)
+                ->through($this->collectMiddlewareStack($conversation, $route))
+                ->then(function (Context $ctx) use ($conversation, $route, &$ticked): Result {
+                    $ticked = true;
+
+                    return $this->tick($ctx, $conversation, $route);
+                });
+
+            if (!$result instanceof Result) {
+                throw new LogicException(\sprintf('Middleware must return %s, got %s.', Result::class, get_debug_type($result)));
             }
 
-            $target = $this->determineExecutionTarget($context);
-            $this->recordTargetMatched($context, $target);
-            $pipeline = new Pipeline($this->container);
-
-            /** @var Result $result */
-            $result = $pipeline
-                ->send($context)
-                ->through($this->collectMiddlewareStack($target))
-                ->then(fn (Context $ctx): Result => $this->executeTarget($ctx, $target));
-
-            if ($this->stateManager !== null && $context->getSession() !== null) {
-                $this->stateManager->saveSession($context->session());
+            if ($ticked && self::shouldPersist($conversation)) {
+                $conversation->persist();
             }
 
             return $this->flushOutboundEffects($context, $result);
         } catch (Throwable $exception) {
+            $context->clearOutboundEffects();
             $this->record('handler.failed', $context->getConversationId(), [
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),
@@ -95,23 +139,18 @@ class Application
 
             return $this->flushOutboundEffects(
                 $context,
-                Result::error($exception->getMessage(), ['exception' => $exception::class])
+                Result::error($exception->getMessage(), ['exception' => $exception::class]),
             );
         } finally {
             $this->container->flush();
         }
     }
 
-    /**
-     * @param array<MiddlewareInterface|class-string<MiddlewareInterface>> $middlewares
-     */
-    public function middleware(array $middlewares): self
-    {
-        foreach ($middlewares as $middleware) {
-            $this->middlewares[] = $middleware;
-        }
+    // -- FlowRuntimeInterface ------------------------------------------------------------------
 
-        return $this;
+    public function onCommand(string $command, callable $handler): Route
+    {
+        return $this->router->onCommand($command, $handler);
     }
 
     public function onTextPrefix(string $prefix, callable $handler): Route
@@ -119,24 +158,19 @@ class Application
         return $this->router->onTextPrefix($prefix, $handler);
     }
 
-    public function onActionPrefix(string $prefix, callable $handler): Route
-    {
-        return $this->router->onActionPrefix($prefix, $handler);
-    }
-
     public function onTextRegex(string $pattern, callable $handler): Route
     {
         return $this->router->onTextRegex($pattern, $handler);
     }
 
-    public function onCommand(string $command, callable $handler): Route
-    {
-        return $this->router->onCommand($command, $handler);
-    }
-
     public function onAction(string $action, callable $handler): Route
     {
         return $this->router->onAction($action, $handler);
+    }
+
+    public function onActionPrefix(string $prefix, callable $handler): Route
+    {
+        return $this->router->onActionPrefix($prefix, $handler);
     }
 
     public function onActionRegex(string $pattern, callable $handler): Route
@@ -149,9 +183,45 @@ class Application
         return $this->router->fallback($handler);
     }
 
-    public function getRouter(): Router
+    public function registerScene(string $sceneClass, ?string $label = null): static
     {
-        return $this->router;
+        $this->conversations->getScenes()->register($sceneClass, $label);
+
+        return $this;
+    }
+
+    public function allowTransition(string $from, string $to, ?callable $guard = null): static
+    {
+        $this->conversations->getTransitions()->allow($from, $to, $guard);
+
+        return $this;
+    }
+
+    public function middleware(array $middlewares): static
+    {
+        foreach ($middlewares as $middleware) {
+            $this->middlewares[] = $middleware;
+        }
+
+        return $this;
+    }
+
+    public function setErrorHandler(callable $handler): static
+    {
+        $this->errorHandler->register(Throwable::class, static function (Throwable $exception, ?Context $context) use ($handler): void {
+            if ($context !== null) {
+                $handler($exception, $context);
+            }
+        });
+
+        return $this;
+    }
+
+    public function onException(string $exception, callable $handler): static
+    {
+        $this->errorHandler->register($exception, $handler);
+
+        return $this;
     }
 
     public function getContainer(): ContainerInterface
@@ -159,9 +229,31 @@ class Application
         return $this->container;
     }
 
-    public function getStateManager(): ?StateManager
+    public function getValidationRegistry(): ValidationRegistry
     {
-        return $this->stateManager;
+        return $this->validationRegistry;
+    }
+
+    public function getScenes(): SceneRegistry
+    {
+        return $this->conversations->getScenes();
+    }
+
+    public function getTransitions(): SceneTransitions
+    {
+        return $this->conversations->getTransitions();
+    }
+
+    // -- accessors -----------------------------------------------------------------------------
+
+    public function getRouter(): Router
+    {
+        return $this->router;
+    }
+
+    public function getConversations(): ConversationManager
+    {
+        return $this->conversations;
     }
 
     public function getAdapter(): PlatformAdapterInterface
@@ -169,96 +261,73 @@ class Application
         return $this->adapter;
     }
 
-    /**
-     * @param array{type: 'scene'|'route'|'none', data: mixed} $target
-     *
-     * @return array<MiddlewareInterface|class-string<MiddlewareInterface>>
-     */
-    private function collectMiddlewareStack(array $target): array
+    public function getErrorHandler(): ErrorHandlerInterface
     {
-        $stack = $this->middlewares;
+        return $this->errorHandler;
+    }
 
-        if ($target['type'] === 'route') {
-            /** @var Route $route */
-            $route = $target['data'];
+    /**
+     * @return list<MiddlewareInterface|class-string<MiddlewareInterface>>
+     */
+    public function getMiddlewares(): array
+    {
+        return $this->middlewares;
+    }
 
-            return [...$stack, ...$route->getMiddlewares()];
+    // -- internals -----------------------------------------------------------------------------
+
+    private function tick(Context $context, Conversation $conversation, ?Route $route): Result
+    {
+        $result = $conversation->tick($context, $route);
+
+        if ($result->messagesOf(RouteMissed::class) !== []) {
+            return Result::noMatch();
         }
 
-        if ($target['type'] === 'scene' && $this->stateManager !== null) {
-            /** @var string $sceneClass */
-            $sceneClass = $target['data'];
-            $scene = $this->stateManager->getRegistry()->get($sceneClass);
+        $handled = $result->messagesOf(RouteHandled::class);
 
-            return [...$stack, ...$scene->getMiddlewares()];
+        if ($handled !== []) {
+            return Result::success($handled[0]->sceneId === RootScene::ID ? 'route_processed' : 'global_route_processed');
+        }
+
+        return Result::success('scene_processed');
+    }
+
+    /**
+     * A conversation that never left the root scene and stored nothing has no snapshot worth
+     * writing; this keeps unknown chats from filling the storage.
+     */
+    private static function shouldPersist(Conversation $conversation): bool
+    {
+        return !$conversation->isNew()
+            || $conversation->inScene()
+            || $conversation->getContext()->getState() !== [];
+    }
+
+    /**
+     * @return list<MiddlewareInterface|class-string<MiddlewareInterface>>
+     */
+    private function collectMiddlewareStack(Conversation $conversation, ?Route $route): array
+    {
+        $stack = $this->middlewares;
+        $sceneId = $conversation->getCurrentScene();
+        $scene = $sceneId === RootScene::ID ? null : $this->conversations->getScenes()->get($sceneId);
+
+        if ($scene !== null) {
+            $stack = [...$stack, ...$scene->getMiddlewares()];
+        }
+
+        if ($route !== null && ($scene === null || ($route->isGlobal() && $scene->allowsGlobalRoutes()))) {
+            $stack = [...$stack, ...$route->getMiddlewares()];
         }
 
         return $stack;
     }
 
-    /**
-     * @return array{type: 'scene'|'route'|'none', data: mixed}
-     */
-    private function determineExecutionTarget(Context $context): array
-    {
-        $activeScene = $context->getSession()?->getCurrentScene();
-        if ($activeScene !== null) {
-            return ['type' => 'scene', 'data' => $activeScene];
-        }
-
-        $route = $this->router->match($context->getEvent());
-        if ($route !== null) {
-            return ['type' => 'route', 'data' => $route];
-        }
-
-        return ['type' => 'none', 'data' => null];
-    }
-
-    /**
-     * @param array{type: 'scene'|'route'|'none', data: mixed} $target
-     */
-    private function executeTarget(Context $context, array $target): Result
-    {
-        if ($target['type'] === 'scene') {
-            if ($this->stateManager === null) {
-                return Result::error('Scene processing is unavailable without a state manager.');
-            }
-
-            /** @var string $sceneClass */
-            $sceneClass = $target['data'];
-            /** @var BaseScene $scene */
-            $scene = $this->stateManager->getRegistry()->get($sceneClass);
-
-            return $this->stateManager->processScene($context, false, $scene)
-                ? Result::success('scene_processed')
-                : Result::noMatch('scene_inactive');
-        }
-
-        if ($target['type'] === 'route') {
-            /** @var Route $route */
-            $route = $target['data'];
-            $this->container->call($route->getHandler(), [
-                Context::class => $context,
-                InboundEventInterface::class => $context->getEvent(),
-                'ctx' => $context,
-                'context' => $context,
-                'event' => $context->getEvent(),
-            ]);
-
-            return Result::success('route_processed');
-        }
-
-        return Result::noMatch();
-    }
-
     private function bindRuntimeDependencies(Context $context): void
     {
-        $this->container->set(Context::class, $context);
-        $this->container->set(InboundEventInterface::class, $context->getEvent());
-
-        if ($this->stateManager !== null) {
-            $this->container->set(StateManager::class, $this->stateManager);
-        }
+        $this->container->scoped(Context::class, $context);
+        $this->container->scoped(InboundEventInterface::class, $context->getEvent());
 
         if ($this->adapter instanceof RuntimeDependencyBinderInterface) {
             $this->adapter->bindRuntimeDependencies($this->container, $context);
@@ -271,43 +340,11 @@ class Application
             try {
                 $delivery = $this->adapter->deliver($context, $effect);
             } catch (Throwable $exception) {
-                $this->logger->error('Outbound delivery failed', [
-                    'exception' => $exception::class,
-                    'message' => $exception->getMessage(),
-                    'effect' => $effect->getType(),
-                    'conversation_id' => $context->getConversationId(),
-                ]);
-
-                $context->clearOutboundEffects();
-                $this->record('delivery.failed', $context->getConversationId(), [
-                    'effect' => $effect->getType(),
-                    'reason' => $exception->getMessage(),
-                ]);
-
-                return Result::error('delivery_failed', [
-                    'reason' => $exception->getMessage(),
-                    'effect' => $effect->getType(),
-                ]);
+                return $this->deliveryFailed($context, $effect->getType(), $exception->getMessage(), null);
             }
 
             if ($delivery->isError()) {
-                $this->logger->error('Outbound delivery failed', [
-                    'message' => $delivery->getMessage(),
-                    'effect' => $effect->getType(),
-                    'conversation_id' => $context->getConversationId(),
-                ]);
-
-                $context->clearOutboundEffects();
-                $this->record('delivery.failed', $context->getConversationId(), [
-                    'effect' => $effect->getType(),
-                    'reason' => $delivery->getMessage(),
-                ]);
-
-                return Result::error('delivery_failed', [
-                    'reason' => $delivery->getMessage(),
-                    'effect' => $effect->getType(),
-                    'data' => $delivery->getData(),
-                ]);
+                return $this->deliveryFailed($context, $effect->getType(), (string) $delivery->getMessage(), $delivery->getData());
             }
 
             $this->record('effect.delivered', $context->getConversationId(), [
@@ -322,24 +359,45 @@ class Application
     }
 
     /**
-     * @param array{type: 'scene'|'route'|'none', data: mixed} $target
+     * @param array<string, mixed>|null $data
      */
-    private function recordTargetMatched(Context $context, array $target): void
+    private function deliveryFailed(Context $context, string $effectType, string $reason, ?array $data): Result
     {
-        if ($target['type'] === 'route') {
-            /** @var Route $route */
-            $route = $target['data'];
-            $this->record('route.matched', $context->getConversationId(), [
-                'route_type' => $route->getType(),
-                'prefix' => $route->getPrefix(),
+        $context->clearOutboundEffects();
+        $this->logger->error('Outbound delivery failed', [
+            'message' => $reason,
+            'effect' => $effectType,
+            'conversation_id' => $context->getConversationId(),
+        ]);
+        $this->record('delivery.failed', $context->getConversationId(), [
+            'effect' => $effectType,
+            'reason' => $reason,
+        ]);
+
+        return Result::error('delivery_failed', array_filter([
+            'reason' => $reason,
+            'effect' => $effectType,
+            'data' => $data,
+        ], static fn(mixed $value): bool => $value !== null));
+    }
+
+    private function recordTarget(Context $context, Conversation $conversation, ?Route $route): void
+    {
+        $sceneId = $conversation->getCurrentScene();
+
+        if ($sceneId !== RootScene::ID) {
+            $this->record('scene.matched', $context->getConversationId(), [
+                'scene' => $sceneId,
+                'global_route' => $route !== null && $route->isGlobal() ? $route->getPattern() : null,
             ]);
 
             return;
         }
 
-        if ($target['type'] === 'scene') {
-            $this->record('scene.matched', $context->getConversationId(), [
-                'scene' => is_string($target['data']) ? $target['data'] : null,
+        if ($route !== null) {
+            $this->record('route.matched', $context->getConversationId(), [
+                'route_type' => $route->getType(),
+                'pattern' => $route->getPattern(),
             ]);
 
             return;

@@ -6,8 +6,16 @@ namespace ChatFlow\Event;
 
 use ChatFlow\Support\SerializableValueValidator;
 
+/**
+ * Platform delivery metadata of the inbound message, used by adapters to edit, answer or reply.
+ */
 final class MessageRef
 {
+    /**
+     * @var array<string, mixed>
+     */
+    private readonly array $platformData;
+
     /**
      * @param array<string, mixed> $platformData
      */
@@ -15,9 +23,9 @@ final class MessageRef
         private readonly ?string $id = null,
         private readonly ?string $threadId = null,
         private readonly ?string $replyToken = null,
-        private readonly array $platformData = [],
+        array $platformData = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->platformData, 'message ref platform data');
+        $this->platformData = SerializableValueValidator::normalizeMap($platformData, 'message ref platform data');
     }
 
     public function getId(): ?string
@@ -40,7 +48,7 @@ final class MessageRef
      */
     public function getPlatformData(): array
     {
-        return SerializableValueValidator::normalizeMap($this->platformData, 'message ref platform data');
+        return $this->platformData;
     }
 
     public function get(string $key, mixed $default = null): mixed

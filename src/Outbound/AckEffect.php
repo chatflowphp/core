@@ -9,8 +9,7 @@ final class AckEffect implements OutboundEffectInterface
     public function __construct(
         private readonly ?string $text = null,
         private readonly bool $error = false,
-    ) {
-    }
+    ) {}
 
     public function getType(): string
     {

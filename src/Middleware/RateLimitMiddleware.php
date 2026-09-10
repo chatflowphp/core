@@ -10,30 +10,24 @@ use ChatFlow\Exception\StorageException;
 use ChatFlow\Storage\StorageInterface;
 
 /**
- * Rate limiting middleware to protect against spam.
+ * Soft per-user rate limit backed by any storage driver.
  *
- * NOTE: This implementation uses a "Check-then-Act" logic which is subject to race conditions
- * in high-concurrency environments. It serves as a "Soft Rate Limit".
- * For strict enforcement, use atomic counters (e.g. Redis INCR).
+ * The counter is read, incremented and written back without a lock, so concurrent requests may
+ * exceed the limit by a few requests. Use an atomic counter (Redis INCR) for strict enforcement.
  */
 class RateLimitMiddleware implements MiddlewareInterface
 {
+    public const KEY_PREFIX = 'rate_limit:';
+
     public function __construct(
-        private StorageInterface $storage,
-        private int $maxRequests = 20,
-        private int $windowSeconds = 60
-    ) {
-    }
+        private readonly StorageInterface $storage,
+        private readonly int $maxRequests = 20,
+        private readonly int $windowSeconds = 60,
+        private readonly ?string $rejectionMessage = null,
+    ) {}
 
     /**
-     * Process the request through rate limiting.
-     *
-     * @param Context  $ctx  The context object
-     * @param callable $next The next middleware in the pipeline
-     *
-     * @return mixed The result of the middleware chain
-     *
-     * @throws StorageException If storage driver fails
+     * @throws StorageException
      */
     public function process(Context $ctx, callable $next): mixed
     {
@@ -43,32 +37,26 @@ class RateLimitMiddleware implements MiddlewareInterface
             return $next($ctx);
         }
 
-        $userIdString = (string) $userId;
-
-        $key = "rate_limit:{$userIdString}";
+        $key = self::KEY_PREFIX . $userId;
         $now = time();
+        $record = $this->storage->get($key) ?? [];
+        $resetAt = $record['reset_at'] ?? null;
+        $count = $record['count'] ?? null;
 
-        /** @var array{count: int, reset_at: int} $data */
-        $data = $this->storage->get($key) ?? [
-            'count' => 0,
-            'reset_at' => $now + $this->windowSeconds,
-        ];
-
-        if ($now > $data['reset_at']) {
-            $data = [
-                'count' => 0,
-                'reset_at' => $now + $this->windowSeconds,
-            ];
+        if (!\is_int($resetAt) || !\is_int($count) || $now > $resetAt) {
+            $resetAt = $now + $this->windowSeconds;
+            $count = 0;
         }
 
-        /** @var int $currentCount */
-        $currentCount = $data['count'];
-        $data['count'] = $currentCount + 1;
+        $count++;
+        $this->storage->save($key, ['count' => $count, 'reset_at' => $resetAt]);
 
-        $this->storage->save($key, $data);
+        if ($count > $this->maxRequests) {
+            if ($this->rejectionMessage !== null) {
+                $ctx->reply($this->rejectionMessage);
+            }
 
-        if ((int) $data['count'] > $this->maxRequests) {
-            return Result::error('Too many requests');
+            return Result::error('rate_limited', ['reset_at' => $resetAt]);
         }
 
         return $next($ctx);

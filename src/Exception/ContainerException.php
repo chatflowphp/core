@@ -14,6 +14,4 @@ use Psr\Container\ContainerExceptionInterface;
  * container-related problems. It implements PSR-11 ContainerExceptionInterface
  * for compatibility with PSR-11 compliant containers.
  */
-class ContainerException extends BotException implements ContainerExceptionInterface
-{
-}
+class ContainerException extends BotException implements ContainerExceptionInterface {}

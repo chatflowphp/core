@@ -9,14 +9,19 @@ use ChatFlow\Support\SerializableValueValidator;
 final class MediaAttachment
 {
     /**
+     * @var array<string, mixed>
+     */
+    private readonly array $meta;
+
+    /**
      * @param array<string, mixed> $meta
      */
     public function __construct(
         private readonly string $type,
         private readonly string $source,
-        private readonly array $meta = [],
+        array $meta = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->meta, 'media meta');
+        $this->meta = SerializableValueValidator::normalizeMap($meta, 'media meta');
     }
 
     public function getType(): string
@@ -34,6 +39,6 @@ final class MediaAttachment
      */
     public function getMeta(): array
     {
-        return SerializableValueValidator::normalizeMap($this->meta, 'media meta');
+        return $this->meta;
     }
 }

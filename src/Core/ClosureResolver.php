@@ -9,41 +9,38 @@ use ChatFlow\Exception\ValidationException;
 use Closure;
 use ReflectionFunction;
 
-class ClosureResolver
+/**
+ * Turns a handler reference into a method name that can be stored in the conversation.
+ *
+ * Scene handlers are persisted between updates, so only named methods are accepted: closures
+ * cannot be serialized.
+ */
+final class ClosureResolver
 {
     /**
-     * Resolves the handler name to a string.
-     *
-     * Used for FSM state persistence. Anonymous functions (Closures) cannot be
-     * reliably serialized/unserialized in session storage, so we enforce
-     * using named methods for Scene handlers.
-     *
      * @param string|array<int, mixed>|Closure $handler
      *
-     * @throws LogicException      If an anonymous closure is passed
-     * @throws ValidationException
+     * @throws LogicException When an anonymous function is given.
+     * @throws ValidationException When the array form is malformed.
      */
     public static function resolveName(string|array|Closure $handler): string
     {
-        if (is_string($handler)) {
+        if (\is_string($handler)) {
             return $handler;
         }
 
-        if (is_array($handler)) {
-            if (count($handler) === 2 && is_string($handler[1])) {
+        if (\is_array($handler)) {
+            if (\count($handler) === 2 && isset($handler[1]) && \is_string($handler[1])) {
                 return $handler[1];
             }
-            throw new ValidationException('Invalid array handler format.');
+
+            throw new ValidationException('Array handlers must have the form [object or class, method name].');
         }
 
-        // At this point, $handler must be Closure due to the union type
-        $reflection = new ReflectionFunction($handler);
-        $name = $reflection->getName();
+        $name = (new ReflectionFunction($handler))->getName();
 
-        if (str_contains($name, '{closure}')) {
-            throw new LogicException(
-                'Anonymous functions (closures) are not supported as handlers. Use a named method instead.'
-            );
+        if (str_contains($name, '{closure')) {
+            throw new LogicException('Anonymous functions are not supported as scene handlers; use a named method instead.');
         }
 
         return $name;

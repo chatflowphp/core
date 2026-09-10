@@ -10,6 +10,11 @@ use InvalidArgumentException;
 final class InboundAttachment
 {
     /**
+     * @var array<string, mixed>
+     */
+    private readonly array $meta;
+
+    /**
      * @param array<string, mixed> $meta
      */
     public function __construct(
@@ -19,13 +24,13 @@ final class InboundAttachment
         private readonly ?string $name = null,
         private readonly ?string $mimeType = null,
         private readonly ?int $size = null,
-        private readonly array $meta = [],
+        array $meta = [],
     ) {
         if (trim($type) === '') {
             throw new InvalidArgumentException('Attachment type must be a non-empty string.');
         }
 
-        SerializableValueValidator::assertSerializable($this->meta, 'attachment meta');
+        $this->meta = SerializableValueValidator::normalizeMap($meta, 'attachment meta');
     }
 
     public function getType(): string
@@ -63,7 +68,7 @@ final class InboundAttachment
      */
     public function getMeta(): array
     {
-        return SerializableValueValidator::normalizeMap($this->meta, 'attachment meta');
+        return $this->meta;
     }
 
     public function get(string $key, mixed $default = null): mixed

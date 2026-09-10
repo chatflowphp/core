@@ -11,6 +11,4 @@ namespace ChatFlow\Exception;
  * user input, failed constraint checks, or other validation-related
  * problems in the application logic.
  */
-class ValidationException extends BotException
-{
-}
+class ValidationException extends BotException {}

@@ -10,8 +10,7 @@ final class RenderEffect implements OutboundEffectInterface
 {
     public function __construct(
         private readonly View $view,
-    ) {
-    }
+    ) {}
 
     public function getType(): string
     {

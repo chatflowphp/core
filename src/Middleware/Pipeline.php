@@ -9,16 +9,19 @@ use ChatFlow\Core\Context;
 use ChatFlow\Exception\ContainerException;
 use ChatFlow\Exception\LogicException;
 
+/**
+ * Onion-style middleware pipeline around a destination callable.
+ */
 class Pipeline
 {
-    /** @var array<MiddlewareInterface|class-string<MiddlewareInterface>> */
+    /**
+     * @var list<MiddlewareInterface|class-string<MiddlewareInterface>>
+     */
     private array $middlewares = [];
 
     private ?Context $context = null;
 
-    public function __construct(private ?ContainerInterface $container = null)
-    {
-    }
+    public function __construct(private readonly ?ContainerInterface $container = null) {}
 
     public function send(Context $context): self
     {
@@ -28,7 +31,7 @@ class Pipeline
     }
 
     /**
-     * @param array<MiddlewareInterface|class-string<MiddlewareInterface>> $middlewares
+     * @param list<MiddlewareInterface|class-string<MiddlewareInterface>> $middlewares
      */
     public function through(array $middlewares): self
     {
@@ -38,74 +41,45 @@ class Pipeline
     }
 
     /**
-     * Execute the pipeline with the given destination.
+     * @param callable(Context): mixed $destination
      *
-     * @param callable $destination The final destination callback
-     *
-     * @return mixed The result of the pipeline execution
-     *
-     * @throws LogicException     If context is not set before running pipeline
-     * @throws ContainerException
+     * @throws LogicException When no context was sent.
+     * @throws ContainerException When a middleware cannot be resolved.
      */
     public function then(callable $destination): mixed
     {
-        if ($this->context === null) {
-            throw new LogicException('Context must be set before running pipeline');
-        }
+        $context = $this->context ?? throw new LogicException('Context must be set before running the pipeline.');
 
-        $pipeline = $this->buildPipeline($destination);
-
-        return $pipeline($this->context);
-    }
-
-    /**
-     * @throws ContainerException
-     */
-    private function buildPipeline(callable $destination): callable
-    {
         $pipeline = $destination;
 
         foreach (array_reverse($this->middlewares) as $middleware) {
-            $middlewareInstance = $this->resolveMiddleware($middleware);
-            $pipeline = function (Context $context) use ($middlewareInstance, $pipeline) {
-                return $middlewareInstance->process($context, $pipeline);
-            };
+            $instance = $this->resolve($middleware);
+            $next = $pipeline;
+            $pipeline = static fn(Context $ctx): mixed => $instance->process($ctx, $next);
         }
 
-        return $pipeline;
+        return $pipeline($context);
     }
 
     /**
-     * Resolve middleware to an instance.
+     * @param MiddlewareInterface|class-string<MiddlewareInterface> $middleware
      *
-     * @param MiddlewareInterface|class-string<MiddlewareInterface> $middleware The middleware to resolve
-     *
-     * @return MiddlewareInterface The resolved middleware instance
-     *
-     * @throws ContainerException If unable to resolve middleware
+     * @throws ContainerException
      */
-    private function resolveMiddleware(mixed $middleware): MiddlewareInterface
+    private function resolve(MiddlewareInterface|string $middleware): MiddlewareInterface
     {
         if ($middleware instanceof MiddlewareInterface) {
             return $middleware;
         }
 
-        if (is_string($middleware)) {
-            if ($this->container !== null && $this->container->has($middleware)) {
-                /** @var MiddlewareInterface $instance */
-                $instance = $this->container->get($middleware);
+        $instance = $this->container !== null && $this->container->has($middleware)
+            ? $this->container->get($middleware)
+            : ($this->container?->make($middleware) ?? (class_exists($middleware) ? new $middleware() : null));
 
-                return $instance;
-            }
-
-            if (class_exists($middleware)) {
-                /** @var MiddlewareInterface $instance */
-                $instance = new $middleware();
-
-                return $instance;
-            }
+        if (!$instance instanceof MiddlewareInterface) {
+            throw new ContainerException(\sprintf('Unable to resolve middleware "%s".', $middleware));
         }
 
-        throw new ContainerException('Unable to resolve middleware: ' . var_export($middleware, true));
+        return $instance;
     }
 }

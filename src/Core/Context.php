@@ -11,9 +11,9 @@ use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Event\MessageRef;
 use ChatFlow\Event\UserRef;
-use ChatFlow\Exception\FSMException;
+use ChatFlow\Exception\SceneException;
+use ChatFlow\Exception\SceneNotFoundException;
 use ChatFlow\Exception\UnsupportedCapabilityException;
-use ChatFlow\FSM\StateManager;
 use ChatFlow\Observability\NullRuntimeObserver;
 use ChatFlow\Observability\RuntimeEvent;
 use ChatFlow\Observability\RuntimeObserverInterface;
@@ -21,27 +21,41 @@ use ChatFlow\Outbound\AckEffect;
 use ChatFlow\Outbound\OutboundEffectInterface;
 use ChatFlow\Outbound\RenderEffect;
 use ChatFlow\Outbound\ReplyEffect;
-use ChatFlow\Storage\Session;
+use ChatFlow\Scene\Conversation;
+use ChatFlow\Scene\Interaction;
+use ChatFlow\Scene\SceneContext;
 use ChatFlow\View\View;
 
+/**
+ * Everything a handler needs for one inbound event: the event, the conversation, the outbound
+ * effect queue and scene navigation.
+ */
 class Context
 {
-    /** @var array<string, mixed> */
+    /**
+     * @var array<string, mixed>
+     */
     private array $items = [];
 
-    /** @var list<OutboundEffectInterface> */
+    /**
+     * @var list<OutboundEffectInterface>
+     */
     private array $effects = [];
+
+    private ?Conversation $conversation = null;
+
+    private readonly RuntimeObserverInterface $runtimeObserver;
 
     public function __construct(
         private readonly InboundEventInterface $event,
         private readonly PlatformAdapterInterface $adapter,
         private readonly ContainerInterface $container,
-        private ?StateManager $stateManager = null,
-        private ?Session $session = null,
-        private ?RuntimeObserverInterface $runtimeObserver = null,
+        ?RuntimeObserverInterface $runtimeObserver = null,
     ) {
-        $this->runtimeObserver ??= new NullRuntimeObserver();
+        $this->runtimeObserver = $runtimeObserver ?? new NullRuntimeObserver();
     }
+
+    // -- inbound event -------------------------------------------------------------------------
 
     public function getEvent(): InboundEventInterface
     {
@@ -98,26 +112,13 @@ class Context
 
     public function hasAttachment(?string $type = null): bool
     {
-        foreach ($this->event->getAttachments() as $attachment) {
-            $attachmentType = $attachment->getType();
-
-            if ($type === null || $type === 'any' || $attachmentType === $type) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->getFirstAttachment($type) !== null;
     }
 
-    /**
-     * @return InboundAttachment|null
-     */
     public function getFirstAttachment(?string $type = null): ?InboundAttachment
     {
         foreach ($this->event->getAttachments() as $attachment) {
-            $attachmentType = $attachment->getType();
-
-            if ($type === null || $type === 'any' || $attachmentType === $type) {
+            if ($type === null || $type === 'any' || $attachment->getType() === $type) {
                 return $attachment;
             }
         }
@@ -138,9 +139,11 @@ class Context
         return $this->event->getMetadata();
     }
 
+    // -- outbound effects ----------------------------------------------------------------------
+
     public function reply(View|string $view): ReplyEffect
     {
-        $normalized = $this->normalizeView($view);
+        $normalized = $view instanceof View ? $view : View::text($view);
         $this->assertViewSupported($normalized, false);
         $effect = new ReplyEffect($normalized);
         $this->enqueueEffect($effect);
@@ -148,10 +151,11 @@ class Context
         return $effect;
     }
 
-    public function render(View $view): RenderEffect
+    public function render(View|string $view): RenderEffect
     {
-        $this->assertViewSupported($view, true);
-        $effect = new RenderEffect($view);
+        $normalized = $view instanceof View ? $view : View::text($view);
+        $this->assertViewSupported($normalized, true);
+        $effect = new RenderEffect($normalized);
         $this->enqueueEffect($effect);
 
         return $effect;
@@ -172,18 +176,9 @@ class Context
     public function enqueueEffect(OutboundEffectInterface $effect): OutboundEffectInterface
     {
         $this->effects[] = $effect;
-        $this->recordEffectQueued($effect);
+        $this->record('effect.queued', ['effect' => $effect->getType()]);
 
         return $effect;
-    }
-
-    public function downloadAttachment(string $destinationDir): ?string
-    {
-        if (!$this->adapter->capabilities()->supportsAttachmentDownload()) {
-            throw new UnsupportedCapabilityException('Current platform does not support attachment download.');
-        }
-
-        return $this->adapter->downloadAttachment($this, $destinationDir);
     }
 
     /**
@@ -199,124 +194,101 @@ class Context
         $this->effects = [];
     }
 
-    public function setStateManager(?StateManager $stateManager): void
+    public function downloadAttachment(string $destinationDir): ?string
     {
-        $this->stateManager = $stateManager;
-    }
-
-    public function getStateManager(): ?StateManager
-    {
-        return $this->stateManager;
-    }
-
-    public function setSession(?Session $session): void
-    {
-        $this->session = $session;
-    }
-
-    public function getSession(): ?Session
-    {
-        return $this->session;
-    }
-
-    /**
-     * @throws FSMException
-     */
-    public function session(): Session
-    {
-        if ($this->session === null) {
-            throw new FSMException(
-                'Sessions are not active. Configure a storage-backed StateManager to use scene features.'
-            );
+        if (!$this->adapter->capabilities()->supportsAttachmentDownload()) {
+            throw new UnsupportedCapabilityException('Current platform does not support attachment download.');
         }
 
-        return $this->session;
+        return $this->adapter->downloadAttachment($this, $destinationDir);
+    }
+
+    // -- conversation and scenes ---------------------------------------------------------------
+
+    /**
+     * @internal
+     */
+    public function attachConversation(Conversation $conversation): void
+    {
+        $this->conversation = $conversation;
+    }
+
+    public function hasConversation(): bool
+    {
+        return $this->conversation !== null;
     }
 
     /**
+     * @throws SceneException When the context was created outside of Application::handle().
+     */
+    public function conversation(): Conversation
+    {
+        return $this->conversation ?? throw new SceneException(
+            'No conversation is attached to this context. Sessions and scenes are available only inside Application::handle().',
+        );
+    }
+
+    /**
+     * Persistent conversation data. Typed getters, push() and increment() come from automata.
+     */
+    public function session(): SceneContext
+    {
+        return $this->conversation()->getContext();
+    }
+
+    public function getCurrentScene(): string
+    {
+        return $this->conversation()->getCurrentScene();
+    }
+
+    public function inScene(): bool
+    {
+        return $this->conversation()->inScene();
+    }
+
+    /**
+     * Transitions into a scene inside the current tick. See Conversation::enter().
+     *
      * @param array<string, mixed> $data
      *
-     * @throws FSMException
-     * @throws \ChatFlow\Exception\StorageException
-     * @throws \ChatFlow\Exception\ContainerException
-     * @throws \ChatFlow\Exception\SceneNotFoundException
+     * @throws SceneNotFoundException
      */
-    public function enter(string $sceneClass, array $data = [], ?string $historyTitle = null): void
+    public function enter(string $scene, array $data = [], ?string $title = null): void
     {
-        if ($this->stateManager === null) {
-            throw new FSMException('State manager is not configured.');
-        }
-
-        $session = $this->session();
-        $currentScene = $session->getCurrentScene();
-        if ($currentScene !== null) {
-            $session->pushHistory($currentScene, $historyTitle);
-        }
-
-        $session->requestScene($sceneClass, $data);
-        $this->stateManager->saveSession($session);
-        $this->stateManager->processScene($this, true);
-        $this->record('scene.entered', ['scene' => $sceneClass]);
+        $this->conversation()->enter($scene, $data, $title);
     }
 
-    /**
-     * @throws FSMException
-     * @throws \ChatFlow\Exception\StorageException
-     * @throws \ChatFlow\Exception\ContainerException
-     * @throws \ChatFlow\Exception\SceneNotFoundException
-     */
     public function back(): void
     {
-        if ($this->stateManager === null) {
-            throw new FSMException('State manager is not configured.');
-        }
-
-        $previousScene = $this->session()->popHistory();
-        if ($previousScene === null) {
-            return;
-        }
-
-        $this->session()->requestScene($previousScene['class']);
-        $this->stateManager->saveSession($this->session());
-        $this->stateManager->processScene($this, true);
+        $this->conversation()->back();
     }
 
-    /**
-     * @throws FSMException
-     * @throws \ChatFlow\Exception\StorageException
-     */
     public function leave(): void
     {
-        if ($this->stateManager === null) {
-            throw new FSMException('State manager is not configured.');
-        }
-
-        $session = $this->session();
-        $session->setCurrentScene(null);
-        $session->clearPendingScene();
-        $session->clearPendingSceneData();
-        $session->clearPendingExit();
-        $session->clearInteraction();
-        $this->stateManager->saveSession($session);
+        $this->conversation()->leave();
     }
 
-    /**
-     * @throws FSMException
-     * @throws \ChatFlow\Exception\StorageException
-     */
     public function clearHistory(): void
     {
         $this->session()->clearHistory();
-
-        if ($this->stateManager !== null) {
-            $this->stateManager->saveSession($this->session());
-        }
     }
 
-    public function getContainer(): ContainerInterface
+    public function canEnter(string $scene): bool
     {
-        return $this->container;
+        return $this->conversation()->canEnter($scene);
     }
+
+    /**
+     * Sends the question and starts describing the expected answer.
+     */
+    public function ask(View|string $view): Interaction
+    {
+        $this->reply($view);
+
+        return new Interaction($this->session());
+    }
+
+    // -- request-scoped items ------------------------------------------------------------------
 
     public function set(string $key, mixed $value): void
     {
@@ -330,7 +302,7 @@ class Context
 
     public function has(string $key): bool
     {
-        return array_key_exists($key, $this->items);
+        return \array_key_exists($key, $this->items);
     }
 
     public function remove(string $key): void
@@ -338,18 +310,9 @@ class Context
         unset($this->items[$key]);
     }
 
-    private function normalizeView(View|string $view): View
+    public function getContainer(): ContainerInterface
     {
-        if ($view instanceof View) {
-            return $view;
-        }
-
-        return View::text($view);
-    }
-
-    private function recordEffectQueued(OutboundEffectInterface $effect): void
-    {
-        $this->record('effect.queued', ['effect' => $effect->getType()]);
+        return $this->container;
     }
 
     /**
@@ -357,7 +320,7 @@ class Context
      */
     private function record(string $name, array $data = []): void
     {
-        $this->runtimeObserver?->record(new RuntimeEvent($name, $this->getConversationId(), $data));
+        $this->runtimeObserver->record(new RuntimeEvent($name, $this->getConversationId(), $data));
     }
 
     private function assertViewSupported(View $view, bool $render): void

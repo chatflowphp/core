@@ -10,77 +10,63 @@ use JsonException;
 use Redis;
 
 /**
- * Redis storage driver for high-load environments.
- * Requires 'ext-redis' PHP extension.
+ * Redis storage. Requires the phpredis extension. Every record expires after the configured TTL.
  */
 class RedisStorage implements StorageInterface
 {
     public function __construct(
         private readonly Redis $redis,
         private readonly string $prefix = 'chatflow:',
-        private readonly int $ttl = 86400
-    ) {
-    }
+        private readonly int $ttlSeconds = 86400,
+    ) {}
 
-    /**
-     * @return array<string, mixed>|null
-     *
-     * @throws StorageException If JSON decoding fails
-     */
-    public function get(string $conversationId): ?array
+    public function get(string $key): ?array
     {
-        $key = $this->prefix . $conversationId;
-        /** @var string|false $data */
-        $data = $this->redis->get($key);
+        $raw = $this->redis->get($this->prefix . $key);
 
-        if ($data === false) {
+        if (!\is_string($raw)) {
             return null;
         }
 
         try {
-            /** @var array<string, mixed> $result */
-            $result = json_decode($data, true, 512, JSON_THROW_ON_ERROR);
-
-            return $result;
-        } catch (JsonException $e) {
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
             return null;
         }
+
+        if (!\is_array($decoded)) {
+            return null;
+        }
+
+        $record = [];
+
+        foreach ($decoded as $recordKey => $value) {
+            $record[(string) $recordKey] = $value;
+        }
+
+        return $record;
     }
 
-    /**
-     * Save session data to Redis.
-     *
-     * @param array<string, mixed> $data
-     *
-     * @throws StorageException If encoding fails or Redis operation fails
-     */
-    public function save(string $conversationId, array $data): void
+    public function save(string $key, array $data): void
     {
         try {
-            $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $json = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
         } catch (JsonException $e) {
-            throw new StorageException('Failed to encode session data for Redis: ' . $e->getMessage(), 0, $e);
+            throw new StorageException('Failed to encode record: ' . $e->getMessage(), 0, $e);
         }
 
-        $key = $this->prefix . $conversationId;
-        /** @var bool|Redis $success */
-        $success = $this->redis->setex($key, $this->ttl, $json);
-
-        if ($success !== true) {
-            throw new StorageException("Failed to write session to Redis for conversation: {$conversationId}");
+        if ($this->redis->setex($this->prefix . $key, $this->ttlSeconds, $json) !== true) {
+            throw new StorageException(\sprintf('Failed to write record "%s" to Redis.', $key));
         }
     }
 
-    public function delete(string $conversationId): void
+    public function delete(string $key): void
     {
-        $this->redis->del($this->prefix . $conversationId);
+        $this->redis->del($this->prefix . $key);
     }
 
-    public function exists(string $conversationId): bool
+    public function exists(string $key): bool
     {
-        /** @var int|bool $result */
-        $result = $this->redis->exists($this->prefix . $conversationId);
-
-        return (bool) $result;
+        return (bool) $this->redis->exists($this->prefix . $key);
     }
 }

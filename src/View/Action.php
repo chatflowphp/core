@@ -6,20 +6,30 @@ namespace ChatFlow\View;
 
 use ChatFlow\Support\SerializableValueValidator;
 
+/**
+ * A button that sends an action id (and optional payload) back to the bot, or opens a URL.
+ */
 final class Action
 {
+    private readonly mixed $payload;
+
+    /**
+     * @var array<string, mixed>
+     */
+    private readonly array $meta;
+
     /**
      * @param array<string, mixed> $meta
      */
     public function __construct(
         private readonly string $id,
         private readonly string $label,
-        private readonly mixed $payload = null,
+        mixed $payload = null,
         private readonly ?string $url = null,
-        private readonly array $meta = [],
+        array $meta = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->payload, 'action payload');
-        SerializableValueValidator::assertSerializable($this->meta, 'action meta');
+        $this->payload = SerializableValueValidator::normalize($payload, 'action payload');
+        $this->meta = SerializableValueValidator::normalizeMap($meta, 'action meta');
     }
 
     public function getId(): string
@@ -34,7 +44,7 @@ final class Action
 
     public function getPayload(): mixed
     {
-        return SerializableValueValidator::normalize($this->payload, 'action payload');
+        return $this->payload;
     }
 
     public function getUrl(): ?string
@@ -47,6 +57,6 @@ final class Action
      */
     public function getMeta(): array
     {
-        return SerializableValueValidator::normalizeMap($this->meta, 'action meta');
+        return $this->meta;
     }
 }

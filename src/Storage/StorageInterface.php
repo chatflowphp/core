@@ -7,31 +7,31 @@ namespace ChatFlow\Storage;
 use ChatFlow\Exception\StorageException;
 
 /**
- * Interface for storage drivers.
+ * Key-value storage for JSON-compatible records. Drivers store records exactly as given.
  */
 interface StorageInterface
 {
     /**
      * @return array<string, mixed>|null
      *
-     * @throws StorageException If storage operation fails
+     * @throws StorageException
      */
-    public function get(string $conversationId): ?array;
+    public function get(string $key): ?array;
 
     /**
      * @param array<string, mixed> $data
      *
-     * @throws StorageException If storage operation fails
+     * @throws StorageException
      */
-    public function save(string $conversationId, array $data): void;
+    public function save(string $key, array $data): void;
 
     /**
-     * @throws StorageException If storage operation fails
+     * @throws StorageException
      */
-    public function delete(string $conversationId): void;
+    public function delete(string $key): void;
 
     /**
-     * @throws StorageException If storage operation fails
+     * @throws StorageException
      */
-    public function exists(string $conversationId): bool;
+    public function exists(string $key): bool;
 }

@@ -7,28 +7,34 @@ namespace ChatFlow\Event;
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Support\SerializableValueValidator;
 
+/**
+ * Platform-neutral inbound event. Payload and metadata are normalized once on construction.
+ */
 final class InboundEvent implements InboundEventInterface
 {
+    private readonly mixed $actionPayload;
+
+    /**
+     * @var array<string, mixed>
+     */
+    private readonly array $metadata;
+
     /**
      * @param list<InboundAttachment> $attachments
-     * @param array<string, mixed>    $metadata
+     * @param array<string, mixed> $metadata
      */
     public function __construct(
         private readonly ConversationRef $conversation,
         private readonly ?UserRef $user = null,
         private readonly string $text = '',
         private readonly ?string $actionId = null,
-        private readonly mixed $actionPayload = null,
+        mixed $actionPayload = null,
         private readonly array $attachments = [],
         private readonly ?MessageRef $messageRef = null,
-        private readonly array $metadata = [],
+        array $metadata = [],
     ) {
-        SerializableValueValidator::assertSerializable($this->actionPayload, 'action payload');
-        SerializableValueValidator::assertSerializable($this->metadata, 'metadata');
-
-        foreach ($this->attachments as $attachment) {
-            $this->assertAttachment($attachment);
-        }
+        $this->actionPayload = SerializableValueValidator::normalize($actionPayload, 'action payload');
+        $this->metadata = SerializableValueValidator::normalizeMap($metadata, 'metadata');
     }
 
     public function getConversation(): ConversationRef
@@ -68,12 +74,9 @@ final class InboundEvent implements InboundEventInterface
 
     public function getActionPayload(): mixed
     {
-        return SerializableValueValidator::normalize($this->actionPayload, 'action payload');
+        return $this->actionPayload;
     }
 
-    /**
-     * @return list<InboundAttachment>
-     */
     public function getAttachments(): array
     {
         return $this->attachments;
@@ -84,15 +87,8 @@ final class InboundEvent implements InboundEventInterface
         return $this->messageRef;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     public function getMetadata(): array
     {
-        return SerializableValueValidator::normalizeMap($this->metadata, 'metadata');
-    }
-
-    private function assertAttachment(InboundAttachment $attachment): void
-    {
+        return $this->metadata;
     }
 }

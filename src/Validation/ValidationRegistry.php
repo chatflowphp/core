@@ -47,7 +47,7 @@ class ValidationRegistry
      *
      * @return ValidatorInterface Validator instance
      *
-     * @throws ValidationException                    If validator not found
+     * @throws ValidationException If validator not found
      * @throws \ChatFlow\Exception\ContainerException
      */
     public function get(string $alias): ValidatorInterface
@@ -58,7 +58,7 @@ class ValidationRegistry
 
         $validator = $this->validators[$alias];
 
-        if (is_object($validator)) {
+        if (\is_object($validator)) {
             return $validator;
         }
 

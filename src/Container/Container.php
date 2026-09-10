@@ -8,33 +8,62 @@ use ChatFlow\Exception\ContainerException;
 use ChatFlow\Exception\ServiceNotFoundException;
 use DI\Container as DIContainer;
 use DI\ContainerBuilder;
+use Invoker\Exception\NotCallableException;
+use Invoker\Exception\NotEnoughParametersException;
+use Invoker\Invoker;
+use Invoker\ParameterResolver\AssociativeArrayResolver;
+use Invoker\ParameterResolver\Container\TypeHintContainerResolver;
+use Invoker\ParameterResolver\DefaultValueResolver;
+use Invoker\ParameterResolver\NumericArrayResolver;
+use Invoker\ParameterResolver\ResolverChain;
+use Invoker\ParameterResolver\TypeHintResolver;
 use Throwable;
 
+use function DI\autowire;
+use function DI\factory;
+
 /**
- * Hybrid Dependency Injection Container.
+ * PHP-DI backed container. Definitions are collected until the first lookup builds the
+ * underlying container; afterwards set() keeps instances for the container lifetime and scoped()
+ * keeps them until flush().
  *
- * Combines PHP-DI for static compilation (performance) and a runtime array
- * for dynamic bindings during request processing.
+ * call() resolves parameters from the given overrides (by type or by name), then from this
+ * container (scoped and persistent instances first, then PHP-DI), then from default values.
  */
 class Container implements ContainerInterface
 {
     private ?DIContainer $container = null;
 
-    /** @var array<string, mixed> */
-    private array $runtimeInstances = [];
+    private ?Invoker $invoker = null;
+
+    /**
+     * @var array<string, mixed>
+     */
+    private array $persistent = [];
+
+    /**
+     * @var array<string, mixed>
+     */
+    private array $scoped = [];
 
     /**
      * @param ContainerBuilder<DIContainer>|null $builder
      */
     public function __construct(
-        private readonly ?ContainerBuilder $builder = null,
+        private ?ContainerBuilder $builder = null,
         bool $autowire = true,
         bool $useAttributes = false,
     ) {
-        if ($this->builder !== null) {
-            $this->builder->useAutowiring($autowire);
-            $this->builder->useAttributes($useAttributes);
+        if ($this->builder === null) {
+            $this->builder = new ContainerBuilder();
         }
+
+        $this->builder->useAutowiring($autowire);
+        $this->builder->useAttributes($useAttributes);
+        $this->builder->addDefinitions([
+            ContainerInterface::class => $this,
+            self::class => $this,
+        ]);
     }
 
     /**
@@ -42,140 +71,7 @@ class Container implements ContainerInterface
      */
     public function enableCompilation(string $directory): void
     {
-        if ($this->builder === null) {
-            throw new ContainerException('Cannot enable compilation: builder is not initialized');
-        }
-        $this->builder->enableCompilation($directory);
-    }
-
-    /**
-     * @throws ContainerException if entry is not found or cannot be resolved
-     */
-    public function get(string $id): mixed
-    {
-        // 1. Check runtime cache (fast path for dynamic objects like Context)
-        if (array_key_exists($id, $this->runtimeInstances)) {
-            return $this->runtimeInstances[$id];
-        }
-
-        $this->ensureBuilt();
-
-        // 2. Check compiled container
-        if (!$this->container->has($id)) {
-            throw new ServiceNotFoundException(sprintf('Service "%s" not found', $id));
-        }
-
-        try {
-            return $this->container->get($id);
-        } catch (Throwable $e) {
-            if ($e instanceof ContainerException) {
-                throw $e;
-            }
-
-            throw new ContainerException($e->getMessage(), 0, $e);
-        }
-    }
-
-    public function has(string $id): bool
-    {
-        if (array_key_exists($id, $this->runtimeInstances)) {
-            return true;
-        }
-
-        try {
-            $this->ensureBuilt();
-
-            return $this->container->has($id);
-        } catch (Throwable) {
-            return false;
-        }
-    }
-
-    /**
-     * @throws ContainerException
-     */
-    public function bind(string $id, mixed $value): void
-    {
-        if ($this->container === null) {
-            // Build-time: Add to definitions
-            if ($this->builder === null) {
-                throw new ContainerException('Cannot bind: builder is not initialized');
-            }
-            $this->builder->addDefinitions([
-                $id => $value,
-            ]);
-        } else {
-            // Runtime: Add to local cache
-            $this->runtimeInstances[$id] = $value;
-        }
-    }
-
-    /**
-     * @throws ContainerException
-     */
-    public function set(string $id, mixed $value): void
-    {
-        $this->bind($id, $value);
-    }
-
-    /**
-     * @throws ContainerException
-     */
-    public function singleton(string $id, string|callable|null $concrete = null): void
-    {
-        if ($this->container !== null) {
-            throw new ContainerException('Cannot register singletons after container is built');
-        }
-
-        if ($this->builder === null) {
-            throw new ContainerException('Cannot register singleton: builder is not initialized');
-        }
-
-        $concrete ??= $id;
-
-        // In PHP-DI, simple values/closures in definitions act as singletons by default
-        $this->builder->addDefinitions([
-            $id => $concrete,
-        ]);
-    }
-
-    /**
-     * @param array<string, mixed> $parameters
-     */
-    public function call(callable $callable, array $parameters = []): mixed
-    {
-        $this->ensureBuilt();
-
-        try {
-            return $this->container->call($callable, $parameters + $this->runtimeInstances);
-        } catch (Throwable $e) {
-            throw $e;
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $parameters
-     *
-     * @throws ContainerException
-     */
-    public function make(string $className, array $parameters = []): mixed
-    {
-        $this->ensureBuilt();
-
-        try {
-            return $this->container->make($className, $parameters);
-        } catch (Throwable $e) {
-            if ($e instanceof ContainerException) {
-                throw $e;
-            }
-
-            throw new ContainerException($e->getMessage(), 0, $e);
-        }
-    }
-
-    public function flush(): void
-    {
-        $this->runtimeInstances = [];
+        $this->builder()->enableCompilation($directory);
     }
 
     /**
@@ -185,13 +81,103 @@ class Container implements ContainerInterface
      */
     public function addDefinitions(array $definitions): void
     {
+        $this->builder()->addDefinitions($definitions);
+    }
+
+    public function get(string $id): mixed
+    {
+        if (\array_key_exists($id, $this->scoped)) {
+            return $this->scoped[$id];
+        }
+
+        if (\array_key_exists($id, $this->persistent)) {
+            return $this->persistent[$id];
+        }
+
+        $container = $this->built();
+
+        if (!$container->has($id)) {
+            throw new ServiceNotFoundException(\sprintf('Service "%s" not found', $id));
+        }
+
+        try {
+            return $container->get($id);
+        } catch (Throwable $e) {
+            throw new ContainerException($e->getMessage(), 0, $e);
+        }
+    }
+
+    public function has(string $id): bool
+    {
+        if (\array_key_exists($id, $this->scoped) || \array_key_exists($id, $this->persistent)) {
+            return true;
+        }
+
+        try {
+            return $this->built()->has($id);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    public function set(string $id, mixed $value): void
+    {
+        if ($this->container === null) {
+            $this->builder()->addDefinitions([$id => $value]);
+
+            return;
+        }
+
+        $this->persistent[$id] = $value;
+    }
+
+    public function scoped(string $id, mixed $value): void
+    {
+        $this->scoped[$id] = $value;
+    }
+
+    public function singleton(string $id, string|callable|null $concrete = null): void
+    {
         if ($this->container !== null) {
-            throw new ContainerException('Cannot add definitions after container is built');
+            throw new ContainerException('Cannot register singletons after the container is built; use set() with an instance instead.');
         }
-        if ($this->builder === null) {
-            throw new ContainerException('Cannot add definitions: builder is not initialized');
+
+        $concrete ??= $id;
+
+        if (\is_callable($concrete)) {
+            $this->builder()->addDefinitions([$id => factory($concrete)]);
+
+            return;
         }
-        $this->builder->addDefinitions($definitions);
+
+        $this->builder()->addDefinitions([$id => autowire($concrete)]);
+    }
+
+    public function call(callable $callable, array $parameters = []): mixed
+    {
+        $this->built();
+
+        try {
+            return $this->invoker()->call($callable, $parameters + $this->scoped + $this->persistent);
+        } catch (NotCallableException|NotEnoughParametersException $e) {
+            throw new ContainerException($e->getMessage(), 0, $e);
+        }
+    }
+
+    public function make(string $className, array $parameters = []): mixed
+    {
+        try {
+            return $this->built()->make($className, $parameters);
+        } catch (ContainerException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            throw new ContainerException($e->getMessage(), 0, $e);
+        }
+    }
+
+    public function flush(): void
+    {
+        $this->scoped = [];
     }
 
     /**
@@ -199,23 +185,49 @@ class Container implements ContainerInterface
      */
     public function getDIContainer(): DIContainer
     {
-        $this->ensureBuilt();
+        return $this->built();
+    }
 
-        return $this->container;
+    private function invoker(): Invoker
+    {
+        return $this->invoker ??= new Invoker(new ResolverChain([
+            new TypeHintResolver(),
+            new AssociativeArrayResolver(),
+            new NumericArrayResolver(),
+            new TypeHintContainerResolver($this),
+            new DefaultValueResolver(),
+        ]), $this);
     }
 
     /**
-     * @phpstan-assert !null $this->container
+     * @return ContainerBuilder<DIContainer>
      *
      * @throws ContainerException
      */
-    private function ensureBuilt(): void
+    private function builder(): ContainerBuilder
+    {
+        if ($this->container !== null) {
+            throw new ContainerException('Cannot add definitions after the container is built.');
+        }
+
+        return $this->builder ?? throw new ContainerException('Container builder is not available.');
+    }
+
+    /**
+     * @throws ContainerException
+     */
+    private function built(): DIContainer
     {
         if ($this->container === null) {
-            if ($this->builder === null) {
-                throw new ContainerException('Cannot build container: builder is not initialized');
+            try {
+                $this->container = ($this->builder ?? throw new ContainerException('Container builder is not available.'))->build();
+            } catch (ContainerException $e) {
+                throw $e;
+            } catch (Throwable $e) {
+                throw new ContainerException($e->getMessage(), 0, $e);
             }
-            $this->container = $this->builder->build();
         }
+
+        return $this->container;
     }
 }

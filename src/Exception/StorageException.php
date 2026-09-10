@@ -11,6 +11,4 @@ namespace ChatFlow\Exception;
  * such as connection failures to Redis or database, file system errors,
  * serialization problems, or other storage-related issues.
  */
-class StorageException extends BotException
-{
-}
+class StorageException extends BotException {}
