@@ -1,43 +1,52 @@
 # Architecture
 
-ChatFlow core is a small runtime pipeline around normalized chat input.
+A conversation is a state machine from `chatflowphp/automata`:
 
-The core pipeline:
+- **states** are scenes, plus the built-in root scene where routes run;
+- **context** is the conversation data (`SceneContext`), including scene history and the pending
+  interaction;
+- **input** is the inbound event plus the route matched for it;
+- **a tick** is the processing of one inbound event;
+- **transitions** are `enter()`, `back()` and `leave()` calls made inside the tick;
+- **the snapshot** is what gets stored between updates.
 
-1. Adapter creates an `InboundEventInterface`.
-2. `Application` creates a `Context`.
-3. Runtime dependencies are bound into the container.
-4. Session is loaded when a `StateManager` exists.
-5. Pending scene transitions are applied.
-6. Active scene or matching route is selected.
-7. Middleware pipeline runs.
-8. Route handler or scene handler runs.
-9. Session is saved.
-10. Queued outbound effects are delivered through the adapter.
-11. Container runtime state is flushed.
+## Pipeline
+
+For every inbound event, `Application::handle()`:
+
+1. creates a `Context` and binds it into the container's request scope;
+2. resumes the conversation: loads the snapshot, or starts the machine in the root scene;
+3. matches a route (adapters may pass one explicitly);
+4. records the target for observability;
+5. builds the middleware stack: global middleware, the active scene's middleware, and the route's
+   middleware when the route will run;
+6. runs the pipeline around one machine tick;
+7. persists the snapshot when the tick ran and the conversation has something worth storing;
+8. delivers the queued outbound effects through the adapter, in order;
+9. flushes the container's request scope.
+
+If anything throws before step 8, the machine has already rolled back its state and context, the
+effect queue is cleared, and the error handler is the only code that may reply.
+
+## What Happens Inside The Tick
+
+The machine hands the input to the current state:
+
+- **Root scene**: runs the matched route handler, or reports "no route".
+- **A scene**: if the route is global and the scene allows it, runs the route; otherwise handles a
+  scene action, a pending interaction, or falls back to `handle()`.
+
+Transitions requested during the tick run immediately: `onLeave()` of the current scene, then
+`onEnter()` of the target, all inside the same operation. Chains are limited to 32 transitions
+per tick.
 
 ## Boundaries
 
-Core owns:
+Core owns the event model, routing, middleware order, scene lifecycle, session mutation, the view
+model, the effect queue, capability enforcement and runtime events.
 
-- Event model.
-- Route matching.
-- Middleware order.
-- Scene lifecycle.
-- Session mutation.
-- View model.
-- Effect queue.
-- Capability enforcement.
-- Runtime events.
-
-Adapters own:
-
-- Platform input parsing.
-- Delivery to remote APIs.
-- Downloading files.
-- Platform capability declaration.
-- Platform-specific helpers.
-- Error mapping around vendor APIs.
+Adapters own platform input parsing, delivery to remote APIs, file downloads, capability
+declaration, platform-specific helpers and error mapping around vendor SDKs.
 
 ## Data Flow
 
@@ -46,40 +55,24 @@ platform update
   -> adapter createInboundEvent()
   -> Application handle()
   -> Context
+  -> ConversationManager resume()
   -> middleware
-  -> route or scene
-  -> Context reply/render/ack
-  -> queued effects
+  -> StateMachine tick()  (root: route handler / scene: action, interaction, handle)
+  -> Context reply/render/ack  (queued)
+  -> persist snapshot
   -> adapter deliver()
 ```
 
 ## Runtime Dependency Binding
 
-`Application` always binds:
-
-- `ChatFlow\Core\Context`
-- `ChatFlow\Contracts\InboundEventInterface`
-- `ChatFlow\FSM\StateManager` when configured
-
-Adapters may implement `RuntimeDependencyBinderInterface`.
-
-This is how `chatflowphp/telegram` injects `TelegramContext` for handlers without leaking Telegram classes into core.
+`Application` binds `Context` and `InboundEventInterface` into the request scope of the
+container. Adapters implementing `RuntimeDependencyBinderInterface` add their own request-scoped
+services (the Telegram adapter binds `TelegramContext`). Handlers receive them by type hint or by
+parameter name.
 
 ## Capability Enforcement
 
-`Context` checks `PlatformCapabilities` before queueing an effect:
-
-- `render()` requires `screenRender`.
-- `ack()` requires `ack`.
-- actions require `actions`.
-- choices require `choices`.
-- media require `media`.
-- `downloadAttachment()` requires `attachmentDownload`.
-
-Unsupported capabilities fail early with `UnsupportedCapabilityException`.
-
-## Portability
-
-`FlowInterface` and `FlowRuntimeInterface` make it possible to register the same flow on multiple adapters when product semantics are actually the same.
-
-This is a capability, not a requirement. Public examples may remain adapter-native.
+`Context` checks `PlatformCapabilities` before queueing an effect: `render()` requires screen
+rendering, `ack()` requires acknowledgements, actions, choices and media require the matching
+capability, `downloadAttachment()` requires attachment download. Unsupported features fail with
+`UnsupportedCapabilityException` before anything is sent.

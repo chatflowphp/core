@@ -1,96 +1,79 @@
 # AI Index: ChatFlow Core
 
-Use this file as compact context when asking AI to implement or modify ChatFlow bots.
+Compact context for implementing bots with ChatFlow 2.x.
 
-## Active Scope
+## Model
 
-Active packages:
+- A conversation is a state machine. Scenes are states; the built-in root scene runs routes.
+- One inbound event is one tick. All state changes happen inside the tick.
+- `Context::enter()`, `back()`, `leave()` are transitions inside the tick.
+- A failing tick rolls back scene, session and queued messages; only the error handler replies.
+- Commands are global routes and interrupt scenes unless the scene returns `false` from
+  `allowsGlobalRoutes()`.
+- Scenes are stateless services; per-user data is in `$ctx->session()`.
 
-- `chatflowphp/core`
-- `chatflowphp/telegram`
-
-Research packages are not part of the active workspace.
-
-## Core Concepts
-
-`Application` handles one normalized inbound event.
-
-`Context` is passed to handlers, scenes and middleware.
-
-`Router` maps text/actions to handlers.
-
-`BaseScene` models multi-step dialogs.
-
-`Session` stores persistent conversation state.
-
-`View` describes platform-neutral output.
-
-`reply`, `render`, `ack` queue outbound effects.
-
-Adapters deliver effects to a platform.
-
-## Correct Handler Pattern
+## Handler Pattern
 
 ```php
 $runtime->onCommand('start', static function (Context $ctx): void {
-    $ctx->reply('Welcome');
+    $ctx->reply(View::text('Welcome')->addActionRow(new Action('shop:open', 'Shop')));
+});
+
+$runtime->onAction('shop:open', static function (Context $ctx): void {
+    $ctx->ack();
+    $ctx->enter(ShopScene::class);
 });
 ```
 
-Use `Context` for portable code.
-
-Use adapter-specific context only in adapter packages.
-
-## Correct Scene Pattern
+## Scene Pattern
 
 ```php
 final class PhoneScene extends BaseScene
 {
     public function handle(Context $ctx): void
     {
-        $this->ask('Send phone')
+        $ctx->ask('Send phone')
             ->validate('regex:/^\+7\d{10}$/', 'Use +79991234567.')
-            ->handle([$this, 'savePhone']);
+            ->onText('cancel', 'onCancel')
+            ->handle('savePhone');
     }
 
     public function savePhone(Context $ctx): void
     {
         $ctx->session()->set('phone', $ctx->getText());
         $ctx->reply('Saved');
-        $this->leave();
+        $ctx->leave();
+    }
+
+    public function onCancel(Context $ctx): void
+    {
+        $ctx->back();
     }
 }
 ```
 
-## Rules For AI Implementations
+## Rules
 
-- Do not call vendor APIs from core code.
-- Do not put Telegram classes into the core repository.
-- Use scalar ids in payload/session state.
-- Use `View`, `Action`, `Choice`, `MediaAttachment` for output.
-- Use `ctx->ack()` for action feedback.
-- Use `ctx->render()` for screen updates.
-- Use `ctx->reply()` for new messages.
-- Register scenes before entering them.
-- Configure storage before using scenes.
-- Add tests with fake adapters for core changes.
+- Register scenes before entering them: `$runtime->registerScene(PhoneScene::class)`.
+- Declare transitions when the spec has a screen map: `$runtime->allowTransition($from, $to, $guard)`.
+- Use `View`, `Action`, `Choice`, `MediaAttachment` for output; `reply()` for new messages,
+  `render()` for screen updates, `ack()` for button feedback.
+- Session values and payloads: scalars, null, arrays, backed enums only.
+- Interaction handlers are method names, never closures.
+- Do not call vendor APIs from core code; adapter classes stay in adapter packages.
+- Inspect state in tests with `$application->getConversations()->resume($id)`.
 
-## Common Task Mapping
+## Task Mapping
 
-Create a command: use `onCommand()`.
-
-Create an inline button: add `Action` to a `View`.
-
-Handle a button: use `onAction()` or `onActionPrefix()`.
-
-Build a dialog: create `BaseScene`, use `ask()`.
-
-Persist state: use `ctx->session()`.
-
-Add logging: pass `JsonlRuntimeObserver`.
-
-Validate input: use scene `validate()` or a custom validator.
-
-Send media: add `MediaAttachment` and ensure platform capability.
-
-Download incoming file: use `ctx->downloadAttachment()`.
+| Task | Use |
+| --- | --- |
+| command | `onCommand()` |
+| button | `Action` in a `View`, handled by `onAction()` / `onActionPrefix()` |
+| button inside a scene | `$this->sceneAction('Label', 'onMethod', $payload)` |
+| multi-step dialog | `BaseScene` with `$ctx->ask()` |
+| navigation | `enter()`, `back()`, `leave()` |
+| restrict navigation | `allowTransition()` with guards |
+| persist state | `$ctx->session()` |
+| logging | `JsonlRuntimeObserver` |
+| validation | `validate()` on `ask()` or a custom validator |
+| incoming file | `$ctx->downloadAttachment()` |

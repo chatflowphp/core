@@ -1,23 +1,24 @@
 # Context
 
-`ChatFlow\Core\Context` is the object handlers, scenes and middleware use during a request.
+`ChatFlow\Core\Context` is passed to route handlers, scene methods and middleware. Handlers
+receive it by type hint or as `$ctx` / `$context`.
 
-## Inbound Access
+## Inbound Event
 
 ```php
-$ctx->getEvent();
-$ctx->getConversation();
-$ctx->getConversationId();
-$ctx->getUser();
-$ctx->getUserId();
+$ctx->getEvent();            // InboundEventInterface
+$ctx->getConversation();     // ConversationRef
+$ctx->getConversationId();   // string, the storage key
+$ctx->getUser();             // ?UserRef
+$ctx->getUserId();           // string|int|null
 $ctx->getText();
 $ctx->isAction();
 $ctx->getActionId();
 $ctx->getActionPayload();
-$ctx->getAttachments();
+$ctx->getAttachments();      // list<InboundAttachment>
+$ctx->hasAttachment('photo');
 $ctx->getFirstAttachment();
-$ctx->hasAttachment();
-$ctx->getMessageRef();
+$ctx->getMessageRef();       // ?MessageRef
 $ctx->getMetadata();
 ```
 
@@ -25,72 +26,75 @@ $ctx->getMetadata();
 
 ```php
 $ctx->reply('Text');
-$ctx->reply(View::text('Text'));
+$ctx->reply(View::text('Text')->addActionRow(new Action('menu:open', 'Menu')));
 $ctx->render(View::text('Updated screen'));
 $ctx->ack('Saved');
-$ctx->ack('Invalid action', error: true);
+$ctx->ack('Not allowed', error: true);
+$ctx->enqueueEffect($adapterSpecificEffect);
 ```
 
-`reply()` queues a new outgoing message.
+Effects are queued and delivered after the tick committed. A failed tick drops them.
 
-`render()` queues a screen update. The adapter decides whether that means edit, replace or send.
-
-`ack()` queues an acknowledgement. Telegram maps this to `answerCallbackQuery()` for callback queries.
-
-## Attachments
-
-Attachments are normalized into `InboundAttachment`:
-
-```php
-if ($ctx->hasAttachment('photo')) {
-    $photo = $ctx->getFirstAttachment('photo');
-}
-```
-
-To download through the active adapter:
-
-```php
-$path = $ctx->downloadAttachment(__DIR__ . '/storage/uploads');
-```
-
-`downloadAttachment()` throws `UnsupportedCapabilityException` if the platform does not support file downloads.
+`downloadAttachment($dir)` asks the adapter to download the first attachment and returns the
+local path, or `null`.
 
 ## Session
 
 ```php
-$session = $ctx->session();
-$session->set('step', 'phone');
-$value = $session->get('step');
+$session = $ctx->session();   // SceneContext
+
+$session->set('cart', [1 => 2]);
+$session->get('cart', []);
+$session->has('cart');
+$session->remove('cart');
+$session->getInt('age');
+$session->getString('name', 'guest');
+$session->getBool('vip');
+$session->getArray('cart');
+$session->getList('log');
+$session->push('log', 'entry');
+$session->increment('visits');
+$session->all();              // user keys only
+$session->clear();
 ```
 
-`session()` requires a configured `StateManager`. Without storage-backed state it throws `FSMException`.
+Values must follow the [serialization rules](serialization.md). Keys starting with `_` are
+reserved for the runtime and cannot be written.
 
-## Scene Navigation
+## Scenes
 
 ```php
-$ctx->enter(MyScene::class);
+$ctx->enter(CheckoutScene::class, ['cart_items' => $items], 'Cart');
+$ctx->enter('checkout');          // by scene id
 $ctx->back();
 $ctx->leave();
 $ctx->clearHistory();
+$ctx->canEnter(CheckoutScene::class);
+$ctx->getCurrentScene();          // scene id, RootScene::ID outside scenes
+$ctx->inScene();
+$ctx->conversation();             // Conversation: machine, history, snapshot access
 ```
 
-`enter()` requests a scene and processes it immediately.
+All of these run inside the current tick. See [Scenes](scenes.md).
 
-`back()` returns to the previous scene from history.
-
-`leave()` clears the active scene.
-
-`clearHistory()` removes scene history.
-
-## Runtime Bag
-
-Middleware and handlers can share request-local values:
+## Asking For Input
 
 ```php
-$ctx->set('visitor', '@alice');
-$ctx->get('visitor', 'guest');
-$ctx->has('visitor');
-$ctx->remove('visitor');
+$ctx->ask('Enter email')
+    ->validate('email', 'Use a valid email.')
+    ->onText('cancel', 'onCancel')
+    ->handle('saveEmail');
 ```
 
-This bag is not persisted. Use `session()` for persistent state.
+`ask()` sends the question and stores an interaction in the session. The next update from the
+conversation goes through the fallbacks, then the validators, then the handler.
+
+## Request Items
+
+`set()`, `get()`, `has()` and `remove()` keep values for the current request only, for example
+data computed by middleware for the handler.
+
+## Container
+
+`getContainer()` returns the runtime container. `Context` and `InboundEventInterface` are bound
+into its request scope while the event is handled.

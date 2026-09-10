@@ -1,35 +1,39 @@
 # Validation
 
-Validation is used mostly by scene interactions.
+Interaction rules are resolved through `ValidationRegistry`.
 
-`ValidationRegistry` maps validation rules to validators.
+## Built-in Rules
 
-Common rules:
+| Alias | Accepts |
+| --- | --- |
+| `required` | non-empty text |
+| `numeric`, `integer` | numeric text |
+| `email` | a valid email address |
+| `regex:/pattern/` | text matching the pattern |
+| `callback` | a callable in the parameters (programmatic use) |
 
-- `required`
-- `email`
-- `numeric`
-- `regex:/pattern/`
-- callback validators
-
-Example:
-
-```php
-$this->ask('Enter phone')
-    ->validate('regex:/^(\+7|7|8)\d{10}$/', 'Use +79991234567 or 89991234567.')
-    ->handle([$this, 'handlePhone']);
-```
-
-When validation fails, the scene replies with the validation message and keeps the interaction active.
+Rules with a parameter use `alias:value`; the parameter reaches the validator as
+`['value' => ...]`, or `['pattern' => ...]` for `regex`.
 
 ## Custom Validators
 
-Implement `ValidatorInterface` and register it in `ValidationRegistry`.
+```php
+use ChatFlow\Validation\ValidatorInterface;
 
-Use custom validators when:
+final class PhoneValidator implements ValidatorInterface
+{
+    public function validate(mixed $value, array $parameters = []): bool
+    {
+        return \is_string($value) && preg_match('/^\+7\d{10}$/', $value) === 1;
+    }
+}
 
-- the rule is reused in many scenes.
-- the rule needs a service.
-- the rule is more readable as a named validation.
+$application->getValidationRegistry()->register('phone', PhoneValidator::class);
+$application->getValidationRegistry()->register('even', new EvenValidator());
+```
 
-For one-off checks, handle it inside the scene method.
+Class names are resolved through the container, so validators can have dependencies.
+
+```php
+$ctx->ask('Phone?')->validate('phone', 'Use +79991234567.')->handle('savePhone');
+```

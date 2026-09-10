@@ -1,8 +1,6 @@
 # Middleware
 
-Middleware wraps route and scene execution.
-
-Implement `MiddlewareInterface`:
+Middleware wraps the tick of every inbound event.
 
 ```php
 use ChatFlow\Core\Context;
@@ -12,40 +10,37 @@ final class VisitorMiddleware implements MiddlewareInterface
 {
     public function process(Context $ctx, callable $next): mixed
     {
-        $ctx->set('visitor', (string) $ctx->getUserId());
+        $ctx->set('visitor', $ctx->getUser()?->getMeta()['username'] ?? 'guest');
 
         return $next($ctx);
     }
 }
 ```
 
-Register globally:
+## Levels
+
+| Level | Registration | Runs |
+| --- | --- | --- |
+| global | `$application->middleware([...])` | for every event |
+| scene | `BaseScene::getMiddlewares()` | while the scene is active |
+| route | `$route->middleware(...)` | when the route runs (root scene, or a global route inside a scene) |
+
+Order: global, scene, route, then the tick.
+
+Middleware is given as instances or class names; class names are resolved through the container.
+
+## Short-Circuiting
+
+A middleware may return a `Result` without calling `$next`:
 
 ```php
-$runtime->middleware([
-    VisitorMiddleware::class,
-]);
+return Result::error('forbidden');
 ```
 
-## Order
+Nothing is persisted in that case. Queue a reply first if the user should be told.
 
-Middleware runs in registration order.
+## Included Middleware
 
-Route-specific middleware is appended after global middleware.
-
-Scene-specific middleware is appended after global middleware.
-
-## Use Cases
-
-- Visitor labels.
-- Access checks.
-- Rate limits.
-- Logging.
-- Per-request service setup.
-- Locale detection.
-
-## What Not To Do
-
-Do not store long-lived data in the runtime bag. Use session storage.
-
-Do not call Telegram SDK from core middleware if the middleware is intended to be portable. Use Telegram-only middleware in `chatflowphp/telegram`.
+- `LoggerMiddleware`: logs every request and its duration.
+- `RateLimitMiddleware`: soft per-user limit backed by any storage driver, with an optional
+  rejection message.

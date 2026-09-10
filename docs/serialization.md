@@ -1,47 +1,19 @@
 # Serialization
 
-Core validates values that may be stored or sent through stable payloads.
+Everything that crosses a request boundary must be JSON-compatible:
 
-Allowed:
+- session data (`$ctx->session()`),
+- action payloads,
+- event, view, action, choice and media metadata,
+- runtime event data.
 
-- `string`
-- `int`
-- `float`
-- `bool`
-- `null`
-- arrays containing allowed values
-- `BackedEnum`
+Allowed values: `null`, `bool`, `int`, `float`, `string`, arrays of allowed values, and backed
+enums (stored as their backing value). Objects, resources, closures and non-backed enums are
+rejected with `InvalidArgumentException` (events and views) or
+`Automata\Exception\InvalidStateValueException` (session) at write time, never at storage time.
 
-Not allowed:
+Top-level session keys must be strings that PHP does not convert to integers; nested arrays may
+use integer keys, so `['cart' => [1 => 2]]` is fine.
 
-- arbitrary objects
-- resources
-- closures
-- non-backed `UnitEnum`
-
-## Where Rules Apply
-
-Rules apply to:
-
-- action payloads
-- view metadata
-- choice metadata
-- media metadata
-- inbound metadata where normalized by core helpers
-- session state
-
-## Why
-
-Bots often store state in files, Redis or databases and may serialize action payloads through platform callback data.
-
-Strict rules avoid silent unserializable state and unstable object payloads.
-
-## Pattern
-
-Store identifiers and scalar payloads:
-
-```php
-new Action('product:add', 'Add', ['id' => 123]);
-```
-
-Do not store service objects or entities in payload/session state. Store ids and load domain objects from services.
+`SerializableValueValidator::normalize()` and `normalizeMap()` implement the rules for adapters
+that build their own value objects.

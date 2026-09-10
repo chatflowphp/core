@@ -1,27 +1,23 @@
 # Observability
 
-Core emits runtime events through `RuntimeObserverInterface`.
+Pass a `RuntimeObserverInterface` to `Application` (or to `ConversationManager`) to receive
+lifecycle events as `RuntimeEvent` objects with a name, a conversation id and data.
 
-Built-in observers:
+| Event | Data | When |
+| --- | --- | --- |
+| `inbound.received` | `is_action`, `action_id`, `text` | at the start of `handle()` |
+| `route.matched` | `route_type`, `pattern` | a route will run in the root scene |
+| `route.missing` | | no scene, no route |
+| `scene.matched` | `scene`, `global_route` | a scene is active |
+| `scene.entered` | `scene`, `from` | a transition into a scene committed |
+| `scene.left` | `scene`, `to` | a transition out of a scene committed |
+| `conversation.reset` | `reason` | a stored snapshot could not be restored and was discarded |
+| `effect.queued` | `effect` | `reply()`, `render()`, `ack()` |
+| `effect.delivered` | `effect`, `message` | the adapter delivered an effect |
+| `delivery.failed` | `effect`, `reason` | the adapter failed |
+| `handler.failed` | `exception`, `message` | a tick or middleware threw |
 
-- `NullRuntimeObserver`
-- `JsonlRuntimeObserver`
-
-## Events
-
-Common events:
-
-- `inbound.received`
-- `route.matched`
-- `route.missing`
-- `scene.matched`
-- `scene.entered`
-- `effect.queued`
-- `effect.delivered`
-- `delivery.failed`
-- `handler.failed`
-
-## JSONL Logs
+`JsonlRuntimeObserver` appends events as newline-delimited JSON:
 
 ```php
 use ChatFlow\Observability\JsonlRuntimeObserver;
@@ -29,17 +25,4 @@ use ChatFlow\Observability\JsonlRuntimeObserver;
 $observer = new JsonlRuntimeObserver(__DIR__ . '/storage/runtime.jsonl');
 ```
 
-Telegram `Bot` accepts `runtimeObserver`.
-
-Use JSONL logs during real bot testing. They show whether a visual issue is a route, scene or delivery problem.
-
-## Event Shape
-
-Each event contains:
-
-- timestamp
-- name
-- conversation id
-- data
-
-Do not put secrets or raw tokens into event data.
+`NullRuntimeObserver` is the default.

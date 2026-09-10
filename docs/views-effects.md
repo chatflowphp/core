@@ -1,73 +1,46 @@
 # Views And Effects
 
-`View` is the platform-neutral outgoing UI model.
-
-If you are using this through `chatflowphp/telegram`, keep this page for the shared effect model and read Telegram docs for delivery details such as edit-or-send fallbacks and callback acknowledgements.
-
 ## View
 
-```php
-View::text('Hello')
-    ->addActionRow(new Action('menu:open', 'Open menu'))
-    ->addChoiceRow(new Choice('Cancel', 'cancel'))
-    ->addMedia(new MediaAttachment('image', 'https://example.com/image.jpg'));
-```
-
-Fields:
-
-- `text`
-- `actions`
-- `choices`
-- `media`
-- `meta`
-
-## Actions
-
-`Action` represents button-like input:
+`ChatFlow\View\View` describes an outgoing message without platform details. Views are
+immutable; every `with*` and `add*` call returns a new view.
 
 ```php
-new Action('cart:add', 'Add to cart', ['id' => 10]);
-new Action('docs', 'Docs', url: 'https://example.com');
+use ChatFlow\View\Action;
+use ChatFlow\View\Choice;
+use ChatFlow\View\MediaAttachment;
+use ChatFlow\View\View;
+
+$view = View::text('Choose a product')
+    ->addActionRow(new Action('product:view', 'Laptop', ['id' => 1]), new Action('product:view', 'Phone', ['id' => 2]))
+    ->addActionRow(new Action('docs', 'Documentation', url: 'https://example.com'))
+    ->addChoiceRow(new Choice('Yes', 'yes'), new Choice('No', 'no'))
+    ->addMedia(new MediaAttachment('image', 'https://example.com/laptop.png'))
+    ->withMeta(['telegram' => ['parse_mode' => 'HTML']]);
 ```
 
-Payload must follow serialization rules.
+- **Actions** are buttons that send an action id and payload back to the bot, or open a URL.
+- **Choices** are quick replies that send their value as text.
+- **Media** attaches images, documents and other files by URL, path or platform file id.
+- **Meta** carries adapter options and must be serializable.
 
-## Choices
-
-`Choice` represents reply-keyboard-like options:
-
-```php
-new Choice('Cancel checkout', 'Cancel checkout');
-```
-
-## Media
-
-`MediaAttachment` represents outbound media:
-
-```php
-new MediaAttachment('image', 'https://example.com/photo.jpg');
-```
-
-Adapters decide how to map media types.
-
-Telegram maps `image` to `sendPhoto`.
+`ViewSerializer` converts views to arrays.
 
 ## Effects
 
-Context methods queue effects:
+Handlers never send messages directly. They queue effects on the context:
 
-- `reply()` -> `ReplyEffect`
-- `render()` -> `RenderEffect`
-- `ack()` -> `AckEffect`
+| Method | Effect | Meaning |
+| --- | --- | --- |
+| `reply()` | `ReplyEffect` | a new message |
+| `render()` | `RenderEffect` | replace the current screen where the platform allows editing |
+| `ack()` | `AckEffect` | lightweight feedback for a button press |
+| `enqueueEffect()` | any `OutboundEffectInterface` | adapter-specific effects |
 
-Adapters deliver those effects.
+Effects are delivered in order after the tick committed. If the tick fails they are dropped.
+If delivery fails, the remaining effects are skipped and the result is `delivery_failed`.
 
-The effect semantics are core-level. The actual wire behavior is adapter-specific.
+## Capabilities
 
-## Delivery Result
-
-Adapters return `DeliveryResult`.
-
-Success means the adapter accepted delivery.
-
-Error means `Application` stops flushing the effect queue and returns `Result::error('delivery_failed')`.
+`PlatformCapabilities` declares what an adapter supports: actions, choices, media, screen render,
+ack and attachment download. `Context` rejects unsupported effects before queueing them.

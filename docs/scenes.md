@@ -1,81 +1,150 @@
 # Scenes
 
-Scenes implement dialog state.
-
-If you are using this through `chatflowphp/telegram`, `BaseScene` is the only scene abstraction most bot authors need. You do not need lower-level FSM internals to build normal Telegram dialogs.
-
-Extend `BaseScene`:
+A scene is one state of the conversation: a screen or a dialog step the user is currently in.
+Extend `ChatFlow\Scene\BaseScene`:
 
 ```php
 use ChatFlow\Core\Context;
-use ChatFlow\FSM\BaseScene;
+use ChatFlow\Scene\BaseScene;
+use ChatFlow\View\View;
 
 final class CheckoutScene extends BaseScene
 {
+    public function __construct(private readonly OrderService $orders) {}
+
     public function handle(Context $ctx): void
     {
-        $this->ask('Send your phone')
+        $ctx->ask('Send your phone')
             ->validate('regex:/^\+7\d{10}$/', 'Use +79991234567.')
-            ->handle([$this, 'handlePhone']);
+            ->onText('cancel', 'onCancel')
+            ->handle('handlePhone');
     }
 
     public function handlePhone(Context $ctx): void
     {
-        $ctx->reply('Thanks');
-        $this->leave();
+        $order = $this->orders->create($ctx->session()->getArray('cart'), $ctx->getText());
+        $ctx->reply(View::text("Order #{$order->id} placed")->addActionRow($this->sceneAction('Home', 'onHome')));
+    }
+
+    public function onCancel(Context $ctx): void
+    {
+        $ctx->reply('Cancelled');
+        $ctx->back();
+    }
+
+    public function onHome(Context $ctx): void
+    {
+        $ctx->leave();
     }
 }
 ```
 
-## Registering Scenes
+## Registering
 
 ```php
-$runtime->registerScene(CheckoutScene::class);
+$application->registerScene(CheckoutScene::class, 'Checkout');
 ```
 
-Scenes require storage:
+Scenes are built once through the container (constructor injection works) and reused for every
+conversation. **Scenes are stateless**: keep per-user data in `$ctx->session()`, never in
+properties.
+
+## Lifecycle
+
+| Hook | When |
+| --- | --- |
+| `onEnter(Context $ctx)` | the conversation transitions into the scene; defaults to `handle()` |
+| `handle(Context $ctx)` | input the scene did not claim otherwise; typically renders the screen again |
+| public `on*` methods | scene actions created with `sceneAction()` |
+| interaction handlers | the answer accepted by `ask()->...->handle()` |
+| `onLeave(Context $ctx)` | the conversation transitions away; the pending interaction is already cleared |
+
+Hooks run inside the tick that triggered the transition. `onEnter()` may reply, ask, or even
+enter another scene.
+
+## Input Protocol
+
+When a scene is active, each update is dispatched in this order:
+
+1. A global route (commands by default) if `allowsGlobalRoutes()` is true.
+2. A scene action: an action id `scene:onMethod` calls the public `onMethod()` of the active
+   scene. Payload keys become named parameters and are also passed as `$params`.
+3. The pending interaction: text or media shortcuts first, then validators, then the handler.
+4. `handle()`.
+
+Stale buttons from other scenes fall through to `handle()`, which re-renders the screen.
+
+## Scene Actions
 
 ```php
-$bot->useStorage(new FileStorage(__DIR__ . '/storage'));
+$view->addActionRow(
+    $this->sceneAction('Add to cart', 'onAddToCart', ['id' => $product->id]),
+    $this->sceneAction('Back', 'onBack'),
+);
+
+public function onAddToCart(Context $ctx, int $id): void { ... }
 ```
 
-## Entering Scenes
-
-```php
-$ctx->enter(CheckoutScene::class, ['cart_items' => $items], 'Cart');
-```
-
-`enter()` pushes history when another scene is active, saves the session and immediately processes the new scene.
-
-## Scene Input
-
-When a scene is active, incoming messages and actions are routed to the scene first.
-
-Scene action ids are usually produced by `BaseScene::sceneAction()` and look like:
-
-```text
-scene:onMethod
-```
+Only public, non-static methods whose name starts with `on` are callable this way.
 
 ## Interactions
 
-`ask()` starts an interaction and can include validation:
-
 ```php
-$this->ask('Enter email')
+$ctx->ask(View::text('Enter email'))
+    ->validate('required', 'Email is required.')
     ->validate('email', 'Use a valid email.')
-    ->handle([$this, 'handleEmail']);
+    ->onText(['cancel', '/^stop/i'], 'onCancel')
+    ->onMedia('photo', 'onPhoto')
+    ->handle('saveEmail');
 ```
 
-Supported validation depends on `ValidationRegistry`.
+- `validate(rule, error)`: rules come from `ValidationRegistry`; a failed rule replies with the
+  error and keeps the interaction.
+- `onText(patterns, handler)`: exact match (case-insensitive) or `/regex/`; runs before validation
+  and consumes the interaction.
+- `onMedia(type, handler)`: an attachment of the type (`any` for all) runs the handler.
+- `handle(method)`: stores the interaction. Handlers are method names, `[$this, 'method']` or
+  first-class callables of named methods; closures are rejected because they cannot be stored.
 
-## History
-
-Use:
+## Navigation
 
 ```php
+$ctx->enter(DetailsScene::class, ['item' => 42], 'Catalog');
 $ctx->back();
-$ctx->clearHistory();
+$ctx->leave();
 ```
 
-Use history for user-facing dialog navigation, not for arbitrary business logs.
+- `enter()` pushes the current scene to history (with the optional title), merges the data into
+  the session, runs `onLeave()` of the current scene and `onEnter()` of the target. Entering the
+  active scene runs its `onEnter()` again without touching history.
+- `back()` returns to the previous scene in history, or to the root scene.
+- `leave()` clears history and returns to the root scene.
+- `clearHistory()` forgets the path without moving.
+
+Allowed paths can be restricted; see [Transitions](transitions.md).
+
+## Scene Ids
+
+The default id is the class name. Override `getId()` to keep stored conversations valid when the
+class moves:
+
+```php
+public function getId(): string
+{
+    return 'checkout';
+}
+```
+
+`enter()`, `allowTransition()` and the test helpers accept either the class or the id.
+
+## Middleware And Options
+
+- `getMiddlewares()`: middleware applied to every tick while the scene is active.
+- `allowsGlobalRoutes()`: return `false` to swallow commands as well.
+- `getTitle()`: a display name, by default the short class name.
+
+## Failure Semantics
+
+If a hook throws, the machine restores the scene, the session and the history to what they were
+before the tick, drops every queued reply, and hands the exception to the error handler. The user
+sees only the error handler's message and stays where they were.

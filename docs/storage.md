@@ -1,55 +1,58 @@
 # Storage
 
-Storage persists sessions used by scenes and user state.
+Storage persists conversations: the current scene, the session data, the history and the pending
+interaction, all inside one automata snapshot per conversation.
 
-## Session Key
+## Key
 
-The storage key is:
-
-```php
-ConversationRef::getId()
-```
-
-Adapters must provide an already-scoped conversation id. Telegram uses chat id.
+The storage key is `ConversationRef::getId()`. Adapters must provide an already-scoped id;
+Telegram uses the chat id.
 
 ## Drivers
 
-Core includes:
+| Driver | Use |
+| --- | --- |
+| `MemoryStorage` | tests and single-process bots; the default when nothing is configured |
+| `FileStorage` | local development and small single-host bots; per-key locks and atomic writes |
+| `RedisStorage` | production; every record expires after the driver TTL (default one day) |
+| `DatabaseStorage` | production with MySQL, PostgreSQL or SQLite through PDO |
 
-- `MemoryStorage`
-- `FileStorage`
-- `RedisStorage`
-- `DatabaseStorage`
+All drivers implement `StorageInterface` (`get`, `save`, `delete`, `exists`) and store records
+exactly as given.
 
-Use `MemoryStorage` for tests only.
+## Database Schema
 
-Use `FileStorage` for local examples and small bots.
+```php
+$pdo->exec(DatabaseStorage::createTableSql('mysql'));   // 'pgsql', 'sqlite'
+```
 
-Use Redis or database storage for long-running production bots.
+The table (`chatflow_conversations` by default) has `record_key`, `record_data` and `updated_at`.
 
-## StateManager
+## Record Format
 
-`StateManager` connects:
+A record is `Automata\Snapshot\StateSnapshot::toArray()`:
 
-- `SceneRegistry`
-- `StorageInterface`
-- optional session TTL
+```json
+{
+  "schemaVersion": 2,
+  "createdAt": "2026-09-10T12:00:00+00:00",
+  "tickCount": 7,
+  "currentStateId": "App\\Scenes\\CheckoutScene",
+  "contextState": {"cart": {"1": 2}, "_history": [{"scene": "App\\Scenes\\ShopScene", "title": "Shop"}]},
+  "stateData": {}
+}
+```
 
-Adapter facades usually create it through `useStorage()`.
-
-## Session Values
-
-Session data must be serializable under core rules:
-
-- scalar
-- `null`
-- arrays of allowed values
-- `BackedEnum`
-
-Objects, resources and non-backed enums are invalid.
+Records that cannot be hydrated (1.x sessions, corrupted data) and snapshots pointing to a scene
+that is no longer registered are deleted on first access and the conversation starts over in the
+root scene. A `conversation.reset` runtime event is recorded in the latter case.
 
 ## TTL
 
-`StateManager` supports optional session TTL. Expired sessions are deleted and recreated on load.
+`ConversationManager` accepts `sessionTtlSeconds`. Expired snapshots (by `createdAt`, which is
+the time of the last write) are deleted on load.
 
-Use TTL for bots where abandoned dialogs should reset automatically.
+## Other Records
+
+Storage is a generic key-value store: `RateLimitMiddleware` keeps its counters under
+`rate_limit:<user id>` in the same storage. Use a distinct prefix for your own records.

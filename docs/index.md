@@ -1,36 +1,19 @@
 # ChatFlow Core Docs
 
-`chatflowphp/core` is the transport-neutral runtime used by `chatflowphp/telegram`.
+`chatflowphp/core` is the transport-neutral runtime used by `chatflowphp/telegram` and other
+adapters. It is responsible for:
 
-The core is responsible for:
+- normalized inbound events;
+- routing and middleware;
+- scenes as states of a per-conversation state machine;
+- conversation storage and snapshots;
+- validation;
+- platform-neutral views and outbound effects;
+- runtime observability;
+- serialization rules.
 
-- Normalized inbound events.
-- Routing.
-- Middleware.
-- Scene/FSM lifecycle.
-- Session storage.
-- Validation.
-- Platform-neutral views and outbound effects.
-- Runtime observability.
-- Serializable value rules.
-
-The core is not responsible for Telegram Bot API calls, webhook parsing, polling, callback payload token storage, media group collection or Telegram-specific rendering behavior. Those belong to `chatflowphp/telegram`.
-
-## Using This Through `chatflowphp/telegram`?
-
-If you are writing a Telegram bot, start in the `chatflowphp/telegram` docs and use core only as a curated reference.
-
-Read this subset first:
-
-1. [Context](context.md)
-2. [Routing](routing.md)
-3. [Views And Effects](views-effects.md)
-4. [Scenes](scenes.md)
-5. [Storage](storage.md)
-6. [Validation](validation.md)
-7. [Testing](testing.md)
-
-Treat [Architecture](architecture.md) and [Application Runtime](application.md) as optional internals unless you are extending adapters or debugging the runtime itself.
+It is not responsible for platform API calls, webhook parsing, polling, callback payload storage
+or platform-specific rendering. Those belong to adapters.
 
 ## Reading Order
 
@@ -38,39 +21,42 @@ Treat [Architecture](architecture.md) and [Application Runtime](application.md) 
 2. [Application Runtime](application.md)
 3. [Context](context.md)
 4. [Routing](routing.md)
-5. [Views And Effects](views-effects.md)
-6. [Scenes](scenes.md)
-7. [Storage](storage.md)
-8. [Validation](validation.md)
-9. [Middleware](middleware.md)
-10. [Observability](observability.md)
-11. [Serialization](serialization.md)
-12. [Testing](testing.md)
-13. [AI Index](ai-index.md)
+5. [Scenes](scenes.md)
+6. [Transitions](transitions.md)
+7. [Views And Effects](views-effects.md)
+8. [Storage](storage.md)
+9. [Validation](validation.md)
+10. [Middleware](middleware.md)
+11. [Observability](observability.md)
+12. [Serialization](serialization.md)
+13. [Testing](testing.md)
+14. [Upgrade From 1.x](upgrade-from-1.x.md)
+15. [AI Index](ai-index.md)
+
+## Using This Through An Adapter?
+
+Bot authors normally read only [Context](context.md), [Routing](routing.md), [Scenes](scenes.md),
+[Transitions](transitions.md), [Views And Effects](views-effects.md), [Storage](storage.md) and
+[Validation](validation.md). The rest documents the runtime for adapter authors.
 
 ## Main Classes
 
 - `ChatFlow\Core\Application`
 - `ChatFlow\Core\Context`
-- `ChatFlow\Contracts\PlatformAdapterInterface`
-- `ChatFlow\Contracts\InboundEventInterface`
-- `ChatFlow\Contracts\FlowRuntimeInterface`
-- `ChatFlow\Contracts\FlowInterface`
-- `ChatFlow\Routing\Router`
-- `ChatFlow\FSM\BaseScene`
-- `ChatFlow\FSM\StateManager`
-- `ChatFlow\Storage\Session`
-- `ChatFlow\View\View`
-- `ChatFlow\View\Action`
-- `ChatFlow\View\Choice`
-- `ChatFlow\View\MediaAttachment`
-- `ChatFlow\Outbound\ReplyEffect`
-- `ChatFlow\Outbound\RenderEffect`
-- `ChatFlow\Outbound\AckEffect`
+- `ChatFlow\Contracts\FlowInterface`, `FlowRuntimeInterface`
+- `ChatFlow\Contracts\PlatformAdapterInterface`, `InboundEventInterface`
+- `ChatFlow\Routing\Router`, `Route`
+- `ChatFlow\Scene\BaseScene`, `RootScene`, `SceneContext`, `SceneTransitions`
+- `ChatFlow\Scene\ConversationManager`, `Conversation`
+- `ChatFlow\Storage\StorageInterface` and the drivers in `ChatFlow\Storage\Drivers`
+- `ChatFlow\View\View`, `Action`, `Choice`, `MediaAttachment`
+- `ChatFlow\Outbound\ReplyEffect`, `RenderEffect`, `AckEffect`
 - `ChatFlow\Platform\PlatformCapabilities`
 
-## Design Rule
+## Design Rules
 
-If a feature needs a Telegram update, Telegram chat id, Telegram callback query id, Telegram file id or Telegram API endpoint, it does not belong in core.
-
-Core should only expose abstractions that can be implemented by another adapter without importing Telegram classes.
+- If a feature needs a platform update, chat id, callback id, file id or API endpoint, it does
+  not belong in the core.
+- Every inbound event is exactly one tick of the conversation's state machine. Handlers and
+  scenes change state only inside that tick.
+- Scenes are stateless. Per-user data lives in `$ctx->session()`.

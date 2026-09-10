@@ -1,70 +1,63 @@
 # Routing
 
-Core routing is platform-neutral. It matches normalized text and action fields from `InboundEventInterface`.
-
-If you are using this through `chatflowphp/telegram`, register routes on `ChatFlow\Telegram\Bot` or a flow that targets `FlowRuntimeInterface`. You do not need to work with raw `Application` for normal product bots.
-
-## Route Methods
-
-Available through `Application`, `FlowRuntimeInterface` and adapter facades:
+Routes are matched in registration order; the first match wins.
 
 ```php
-$runtime->onCommand('start', $handler);
-$runtime->onTextPrefix('/search', $handler);
-$runtime->onTextRegex('/^order:\d+$/', $handler);
-$runtime->onAction('cart:open', $handler);
-$runtime->onActionPrefix('cart:', $handler);
-$runtime->onActionRegex('/^scene:/', $handler);
-$runtime->fallback($handler);
+$application->onCommand('start', $handler);            // "/start", "/start args", "/start@my_bot"
+$application->onTextPrefix('/search', $handler);
+$application->onTextRegex('/^ticket:\d+$/', $handler);
+$application->onAction('support:open', $handler);
+$application->onActionPrefix('support:', $handler);
+$application->onActionRegex('/^scene:/', $handler);
+$application->fallback($handler);
 ```
 
-## Matching Rules
-
-First registered route wins.
-
-`onCommand('start')` matches:
-
-- `/start`
-- `/start extra text`
-
-Action routes use `Context::getActionId()`.
-
-Text routes use `Context::getText()`.
-
-## Handler Parameters
-
-Handlers are called through the container. Common supported parameters:
+Every method returns the `Route`, which accepts middleware:
 
 ```php
-static function (Context $ctx): void {}
-static function (InboundEventInterface $event): void {}
-static function (Context $ctx, MyService $service): void {}
+$application->onCommand('admin', $handler)->middleware(AdminOnlyMiddleware::class);
 ```
 
-Core binds aliases:
+## Where Routes Run
 
-- `Context::class`
-- `InboundEventInterface::class`
-- `$ctx`
-- `$context`
-- `$event`
+Routes run in the root scene, that is, when no scene is active.
 
-Adapters may bind additional objects such as `TelegramContext`.
-
-## Scenes Before Routes
-
-When a session has an active scene, that scene receives input before routes are considered.
-
-This lets a dialog handle free text such as phone numbers without global routes stealing the message.
-
-## Fallback
-
-Fallback is useful for `/help`-style bots:
+**Global routes** also interrupt an active scene. Commands are global by default; every other
+route becomes global with `global()`:
 
 ```php
-$runtime->fallback(static function (Context $ctx): void {
-    $ctx->reply('I did not understand. Type /start.');
+$application->onAction('main:open', $handler)->global();
+$application->onCommand('quiz', $handler)->global(false);
+```
+
+A scene refuses global routes by returning `false` from `allowsGlobalRoutes()`.
+
+A global route that navigates (`$ctx->enter()`, `$ctx->leave()`) transitions the machine like any
+scene method would; one that only replies leaves the scene untouched.
+
+## Handlers
+
+Handlers are callables invoked through the container. Parameters resolve by type hint or by name:
+
+```php
+$application->onCommand('start', static function (Context $ctx, OrderService $orders): void {
+    $ctx->reply('Open orders: ' . $orders->countOpen());
 });
 ```
 
-Do not use fallback when silent no-match behavior is desired.
+Available by name: `ctx`, `context`, `event`.
+
+## Custom Routes
+
+Adapters can run a handler chosen outside the router while keeping middleware, sessions and
+rollback:
+
+```php
+$application->handle($event, Route::custom('media', $handler));
+$application->handle($event, Route::custom('membership', $handler, global: true));
+```
+
+## No Match
+
+When no scene is active and no route matches, `handle()` returns `Result::noMatch()` and nothing
+is stored. Register `fallback()` to answer unknown input.

@@ -1,68 +1,100 @@
 # Application Runtime
 
-`ChatFlow\Core\Application` is the main core runtime.
+`ChatFlow\Core\Application` receives normalized inbound events and returns a `Result`. It also
+implements `FlowRuntimeInterface`, so flows register directly against it.
 
-It receives an already-normalized `InboundEventInterface` and returns a `Result`.
-
-## Constructor Dependencies
-
-The application requires:
-
-- `PlatformAdapterInterface`
-- `Router`
-- `ContainerInterface`
-- `ErrorHandlerInterface`
-- `ValidationRegistry`
-- optional `StateManager`
-- optional PSR logger
-- optional `RuntimeObserverInterface`
-
-Adapters usually hide this constructor behind a facade. In Telegram this facade is `ChatFlow\Telegram\Bot`.
-
-## Handling Order
-
-The official order is:
-
-1. Record `inbound.received`.
-2. Bind runtime dependencies.
-3. Load session if storage is configured.
-4. Apply pending scene transitions.
-5. Pick active scene or matching route.
-6. Run middleware.
-7. Run route handler or scene handler.
-8. Save session.
-9. Flush outbound effects in queue order.
-10. Flush container runtime state.
-
-## Error Handling
-
-Any exception from middleware, route or scene is handled by `ErrorHandlerInterface`.
-
-If the error handler queues replies or acknowledgements, those effects are flushed too.
-
-If delivery fails, `Application` returns:
+## Construction
 
 ```php
-Result::error('delivery_failed', [
-    'reason' => '...',
-    'effect' => 'reply|render|ack',
-])
+use ChatFlow\Container\Container;
+use ChatFlow\Core\Application;
+
+$application = new Application($adapter, new Container());
 ```
 
-## No Match
+Optional constructor arguments:
 
-When no route and no active scene match, the result is `Result::noMatch()`.
+- `Router $router`
+- `ConversationManager $conversations` (default: registered scenes, `MemoryStorage`, no TTL)
+- `ErrorHandlerInterface $errorHandler` (default: `ExceptionRegistry`)
+- `ValidationRegistry $validationRegistry`
+- `LoggerInterface $logger`
+- `RuntimeObserverInterface $runtimeObserver`
 
-Use `Router::fallback()` when the bot should answer unmatched messages.
+To use persistent storage and a session TTL, build the manager yourself:
 
-## Effects
+```php
+use ChatFlow\Scene\ConversationManager;
+use ChatFlow\Scene\SceneRegistry;
+use ChatFlow\Storage\Drivers\FileStorage;
+use ChatFlow\Validation\ValidationRegistry;
 
-Handlers do not send messages immediately. They call:
+$scenes = new SceneRegistry($container);
+$validation = new ValidationRegistry($container);
+$conversations = new ConversationManager(
+    $scenes,
+    $validation,
+    new FileStorage(__DIR__ . '/storage'),
+    sessionTtlSeconds: 86400,
+);
 
-- `$ctx->reply(...)`
-- `$ctx->render(...)`
-- `$ctx->ack(...)`
+$application = new Application($adapter, $container, conversations: $conversations, validationRegistry: $validation);
+```
 
-These queue effects. `Application` flushes them only after the handler and middleware chain completes.
+Adapters usually hide this behind a facade; in Telegram it is `ChatFlow\Telegram\Bot`.
 
-This keeps runtime state consistent before outbound delivery begins.
+## Handling
+
+```php
+$result = $application->handle($event);
+$result = $application->handle($event, Route::custom('media', $handler));
+```
+
+The second form skips the router and uses the given route. A non-global custom route runs only
+when no scene is active; mark it `global` to run it inside scenes as well.
+
+Order of work: bind request dependencies, resume the conversation, match the route, run
+middleware around one tick, persist, deliver effects, flush the container scope. See
+[Architecture](architecture.md).
+
+## Results
+
+| Status | Message | When |
+| --- | --- | --- |
+| `success` | `route_processed` | a route ran in the root scene |
+| `success` | `global_route_processed` | a global route ran inside a scene |
+| `success` | `scene_processed` | the active scene consumed the event |
+| `no_match` | `null` | no scene is active and no route matched |
+| `error` | exception message | a handler, scene or middleware threw |
+| `error` | `delivery_failed` | the adapter could not deliver an effect |
+| any | middleware value | a middleware returned its own `Result` without calling `$next` |
+
+## Errors
+
+Any exception from middleware, routes or scenes is passed to `ErrorHandlerInterface::handle()`
+with the context. Before that, the machine has rolled back the scene and session and the effect
+queue was cleared, so partial screens are never sent. Effects queued by the error handler are
+delivered.
+
+Register handlers by exception type; the most specific one wins:
+
+```php
+$application->onException(ProductNotFoundException::class, static function (Throwable $e, ?Context $ctx): void {
+    $ctx?->ack('Product is gone.', true);
+});
+
+$application->setErrorHandler(static function (Throwable $e, Context $ctx): void {
+    $ctx->reply('Something went wrong. Send /start.');
+});
+```
+
+Without handlers, `ExceptionRegistry` logs the exception and replies with a generic message, or
+with the exception message for `UserFriendlyException`, or with class, message and location when
+constructed with `debug: true`.
+
+## Persistence Rules
+
+The snapshot is written after a successful tick, except for conversations that never left the
+root scene and stored nothing: unknown chats sending random text do not fill the storage.
+
+Nothing is written when a tick fails or when middleware short-circuits.
