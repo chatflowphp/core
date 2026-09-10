@@ -1,12 +1,10 @@
 includes:
-    - vendor/phpstan/phpstan/conf/bleedingEdge.neon
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+    - vendor/phpstan/phpstan-deprecation-rules/rules.neon
 
 parameters:
-    level: 5
+    level: max
     paths:
         - src
         - tests
-    phpVersion: 80200
-    bootstrapFiles:
-        - vendor/autoload.php
-    reportUnmatchedIgnoredErrors: false
+    tmpDir: var/phpstan

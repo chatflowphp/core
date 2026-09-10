@@ -1,8 +1,9 @@
 {
     "name": "chatflowphp/core",
-    "description": "Platform-neutral conversational flow core for PHP.",
+    "description": "Platform-neutral conversational runtime for PHP: scenes as states on top of chatflowphp/automata.",
     "type": "library",
     "license": "MIT",
+    "keywords": ["chatbot", "conversation", "state-machine", "scenes", "telegram"],
     "homepage": "https://github.com/chatflowphp/core",
     "authors": [
         {
@@ -18,17 +19,22 @@
     },
     "require": {
         "php": "^8.2",
-        "monolog/monolog": "^3.0",
+        "chatflowphp/automata": "^2.0",
         "php-di/php-di": "^7.0",
+        "psr/clock": "^1.0",
         "psr/container": "^2.0",
-        "psr/log": "^3.0",
-        "vlucas/phpdotenv": "^5.5",
-        "chatflowphp/automata": "^1.0"
+        "psr/log": "^3.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.64",
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpunit/phpunit": "^10.5"
     },
     "suggest": {
-        "ext-redis": "Required for Redis-based session storage.",
         "ext-pdo": "Required for PDO-backed session storage.",
-        "symfony/translation": "Required if you use the optional translator adapters."
+        "ext-redis": "Required for Redis-based session storage."
     },
     "autoload": {
         "psr-4": {
@@ -37,30 +43,24 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "ChatFlow\\Tests\\": "tests/",
-            "ChatFlow\\Tests\\Fixtures\\": "tests/"
+            "ChatFlow\\Tests\\": "tests/"
         }
-    },
-    "require-dev": {
-        "friendsofphp/php-cs-fixer": "^3.93",
-        "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^10.5",
-        "symfony/translation": "^7.0 || ^8.0"
     },
     "scripts": {
-        "test": "vendor/bin/phpunit -c phpunit.xml",
-        "analyse": "vendor/bin/phpstan analyse -c phpstan.neon --memory-limit=1G",
+        "cs": "php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "php-cs-fixer fix",
+        "stan": "phpstan analyse --memory-limit=1G",
+        "test": "phpunit",
         "check": [
-            "@analyse",
+            "@composer validate --strict",
+            "@cs",
+            "@stan",
             "@test"
-        ],
-        "cs-fix": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php",
-        "cs-check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff"
+        ]
     },
     "config": {
-        "sort-packages": true,
-        "allow-plugins": {
-            "php-http/discovery": true
-        }
-    }
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }

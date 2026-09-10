@@ -1,0 +1,33 @@
+name: Link chatflowphp/automata
+description: >
+  Until chatflowphp/automata 2.x is published on Packagist, clone it next to the checkout
+  and register it as a Composer path repository. The branch matching the current ref is
+  preferred, then "v2", then the default branch.
+
+runs:
+  using: composite
+  steps:
+    - name: Clone and register path repository
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        repo="https://github.com/chatflowphp/automata.git"
+        current="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+        target=""
+
+        for candidate in "$current" "v2"; do
+          if git ls-remote --exit-code --heads "$repo" "$candidate" >/dev/null 2>&1; then
+            target="$candidate"
+            break
+          fi
+        done
+
+        if [ -n "$target" ]; then
+          git clone --depth=1 --branch "$target" "$repo" ../chatflow-automata
+        else
+          git clone --depth=1 "$repo" ../chatflow-automata
+        fi
+
+        composer config repositories.chatflowphp-automata \
+          '{"type":"path","url":"../chatflow-automata","options":{"symlink":false,"versions":{"chatflowphp/automata":"2.0.0"}}}'

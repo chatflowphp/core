@@ -1,14 +1,37 @@
+# IDE and editor files
+/.idea/
+/.vscode/
+/.fleet/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Claude Code session state
+/.claude/
+
 # Composer
 /vendor/
 composer.lock
 
-# Runtime data
-/storage/
-/var/
+# PHPUnit
+/.phpunit.cache/
+/.phpunit.result.cache
 
-# Tool caches
+# PHP CS Fixer (local override; the dist config is committed)
 .php-cs-fixer.cache
-.phpunit.result.cache
+.php-cs-fixer.php
 
-# Environment variables
+# Tool output and runtime data
+/var/
+/storage/
+/coverage/
+clover.xml
+*.log
+
+# Environment files
 .env
+.env.local
