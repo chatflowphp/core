@@ -145,6 +145,13 @@ $application->getConversations()->leaveLater($chatId);
 reference) goes through the regular runtime with middleware, persistence, rollback and delivery,
 so `onEnter()` can reply. `$ctx->isSystem()` tells handlers apart from user events.
 
+They accept a `ConversationRef` instead of an id when the adapter needs platform facts to deliver
+the messages, for example the chat a conversation scoped to one group member belongs to:
+
+```php
+$application->enter(new ConversationRef('-100500:222', 'telegram', ['chat' => ['id' => -100500]]), ReviewScene::class);
+```
+
 `enterLater()` and `leaveLater()` store a pending transition in the snapshot. When the next event
 arrives, the transition runs first as its own transaction: the target's `onEnter()` replies with a
 real request context, the result is persisted and delivered, and then the event is consumed

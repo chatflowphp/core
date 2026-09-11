@@ -10,6 +10,7 @@ use ChatFlow\Contracts\FlowRuntimeInterface;
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Contracts\RuntimeDependencyBinderInterface;
+use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\SystemEvent;
 use ChatFlow\Exception\ErrorHandlerInterface;
 use ChatFlow\Exception\ExceptionRegistry;
@@ -129,13 +130,17 @@ class Application implements FlowRuntimeInterface
      * Runs a handler inside a conversation without an inbound user event: schedulers, admin
      * actions and other chats use it to enter scenes, leave them or send messages through the
      * regular runtime, with middleware, persistence, rollback and delivery.
+     *
+     * Pass a `ConversationRef` instead of an id when the adapter needs platform facts to deliver
+     * the messages, such as the chat a scoped conversation belongs to.
      */
-    public function run(string $conversationId, callable $handler, string $reason = 'system'): Result
+    public function run(string|ConversationRef $conversation, callable $handler, string $reason = 'system'): Result
     {
-        return $this->handle(
-            SystemEvent::forConversation($conversationId, $reason),
-            Route::custom('system:' . $reason, $handler, global: true),
-        );
+        $event = $conversation instanceof ConversationRef
+            ? new SystemEvent($conversation, reason: $reason)
+            : SystemEvent::forConversation($conversation, $reason);
+
+        return $this->handle($event, Route::custom('system:' . $reason, $handler, global: true));
     }
 
     /**
@@ -144,9 +149,9 @@ class Application implements FlowRuntimeInterface
      *
      * @param array<string, mixed> $data
      */
-    public function enter(string $conversationId, string $scene, array $data = [], ?string $title = null): Result
+    public function enter(string|ConversationRef $conversation, string $scene, array $data = [], ?string $title = null): Result
     {
-        return $this->run($conversationId, static function (Context $ctx) use ($scene, $data, $title): void {
+        return $this->run($conversation, static function (Context $ctx) use ($scene, $data, $title): void {
             $ctx->enter($scene, $data, $title);
         }, 'enter');
     }
@@ -154,9 +159,9 @@ class Application implements FlowRuntimeInterface
     /**
      * Leaves the current scene now, from outside of a request.
      */
-    public function leave(string $conversationId): Result
+    public function leave(string|ConversationRef $conversation): Result
     {
-        return $this->run($conversationId, static function (Context $ctx): void {
+        return $this->run($conversation, static function (Context $ctx): void {
             $ctx->leave();
         }, 'leave');
     }

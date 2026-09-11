@@ -10,6 +10,7 @@ use ChatFlow\Contracts\FlowRuntimeInterface;
 use ChatFlow\Core\Application;
 use ChatFlow\Core\Context;
 use ChatFlow\Core\Result;
+use ChatFlow\Event\ConversationRef;
 use ChatFlow\Middleware\MiddlewareInterface;
 use ChatFlow\Outbound\OutboundEffectInterface;
 use ChatFlow\Platform\PlatformCapabilities;
@@ -438,5 +439,27 @@ final class ApplicationTest extends TestCase
         self::assertInstanceOf(Route::class, $route);
         self::assertSame(Route::TEXT_PREFIX, $route->getType());
         self::assertSame('', $argument, 'Only command routes have an argument.');
+    }
+
+    public function testOutsideRequestEntryCanCarryPlatformFactsInTheConversationReference(): void
+    {
+        $adapter = new FakePlatformAdapter();
+        $application = TestApp::create($adapter);
+        $meta = null;
+        $conversationId = null;
+
+        $result = $application->run(
+            new ConversationRef('-100500:222', 'telegram', ['chat' => ['id' => -100500]]),
+            static function (Context $ctx) use (&$meta, &$conversationId): void {
+                $meta = $ctx->getConversation()->getMeta();
+                $conversationId = $ctx->getConversationId();
+                $ctx->reply(View::text('scheduled'));
+            },
+        );
+
+        self::assertTrue($result->isSuccess());
+        self::assertSame('-100500:222', $conversationId);
+        self::assertSame(['chat' => ['id' => -100500]], $meta, 'The adapter facts survive into the handler.');
+        self::assertCount(1, $adapter->replies);
     }
 }

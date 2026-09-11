@@ -11,6 +11,8 @@ All notable changes to this project are documented in this file. The format foll
 - `Context::getRoute()` and `Context::getCommandArgument()`, plus `Route::commandArgument()`:
   handlers read the argument of the matched command, which is what deep links carry
   ("/start ref_abc123").
+- `Application::run()`, `enter()` and `leave()` accept a `ConversationRef` as well as an id, so an
+  adapter can carry platform facts (the chat behind a scoped conversation) into a system tick.
 - `ChatFlow\I18n`: `TranslatorInterface` with `ArrayTranslator` and `SymfonyTranslatorAdapter`,
   locale resolution through `LocaleResolverInterface`, `SessionLocaleResolver` and
   `ChainLocaleResolver`, `Middleware\LocaleMiddleware`, and `Context::t()` / `getLocale()` /
