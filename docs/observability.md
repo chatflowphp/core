@@ -5,12 +5,14 @@ lifecycle events as `RuntimeEvent` objects with a name, a conversation id and da
 
 | Event | Data | When |
 | --- | --- | --- |
-| `inbound.received` | `is_action`, `action_id`, `text` | at the start of `handle()` |
+| `inbound.received` | `is_action`, `action_id`, `text`, `system` | at the start of `handle()` |
 | `route.matched` | `route_type`, `pattern` | a route will run in the root scene |
 | `route.missing` | | no scene, no route |
 | `scene.matched` | `scene`, `global_route` | a scene is active |
 | `scene.entered` | `scene`, `from` | a transition into a scene committed |
 | `scene.left` | `scene`, `to` | a transition out of a scene committed |
+| `scene.pending_applied` | `action`, `scene`, `handle_trigger` | a scheduled transition ran before the event |
+| `scene.pending_failed` | `action`, `scene`, `exception`, `message` | a scheduled transition failed and was dropped |
 | `conversation.reset` | `reason` | a stored snapshot could not be restored and was discarded |
 | `effect.queued` | `effect` | `reply()`, `render()`, `ack()` |
 | `effect.delivered` | `effect`, `message` | the adapter delivered an effect |

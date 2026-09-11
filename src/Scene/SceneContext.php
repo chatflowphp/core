@@ -20,6 +20,7 @@ use ChatFlow\Exception\SceneException;
  *
  * @phpstan-import-type InteractionConfig from Interaction
  * @phpstan-type HistoryEntry array{scene: string, title: string|null}
+ * @phpstan-type PendingTransition array{action: 'enter'|'leave', scene: string|null, data: array<string, mixed>, title: string|null, handleTrigger: bool}
  */
 class SceneContext extends ArrayContext
 {
@@ -27,6 +28,7 @@ class SceneContext extends ArrayContext
 
     private const HISTORY_KEY = '_history';
     private const INTERACTION_KEY = '_interaction';
+    private const PENDING_KEY = '_pending';
     private const EXTENSION_PREFIX = '_ext.';
 
     private ?Context $request = null;
@@ -199,6 +201,66 @@ class SceneContext extends ArrayContext
     public function clearInteraction(): void
     {
         parent::remove(self::INTERACTION_KEY);
+    }
+
+    // -- pending transition --------------------------------------------------------------------
+
+    /**
+     * Records a transition requested outside of a request (scheduler, admin action, another
+     * chat). The runtime applies it when the conversation receives its next event.
+     *
+     * @param PendingTransition $transition
+     */
+    public function setPendingTransition(array $transition): void
+    {
+        parent::set(self::PENDING_KEY, $transition);
+    }
+
+    /**
+     * @return PendingTransition|null
+     */
+    public function getPendingTransition(): ?array
+    {
+        $raw = $this->get(self::PENDING_KEY);
+
+        if (!\is_array($raw)) {
+            return null;
+        }
+
+        $action = $raw['action'] ?? null;
+        $scene = $raw['scene'] ?? null;
+        $title = $raw['title'] ?? null;
+        $rawData = $raw['data'] ?? [];
+
+        if (($action !== 'enter' && $action !== 'leave') || ($scene !== null && !\is_string($scene)) || !\is_array($rawData)) {
+            return null;
+        }
+
+        $data = [];
+
+        foreach ($rawData as $key => $value) {
+            if (\is_string($key)) {
+                $data[$key] = $value;
+            }
+        }
+
+        return [
+            'action' => $action,
+            'scene' => $scene,
+            'data' => $data,
+            'title' => \is_string($title) ? $title : null,
+            'handleTrigger' => ($raw['handleTrigger'] ?? false) === true,
+        ];
+    }
+
+    public function hasPendingTransition(): bool
+    {
+        return $this->getPendingTransition() !== null;
+    }
+
+    public function clearPendingTransition(): void
+    {
+        parent::remove(self::PENDING_KEY);
     }
 
     // -- adapter extensions --------------------------------------------------------------------

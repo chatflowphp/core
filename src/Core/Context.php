@@ -10,6 +10,7 @@ use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Event\MessageRef;
+use ChatFlow\Event\SystemEvent;
 use ChatFlow\Event\UserRef;
 use ChatFlow\Exception\SceneException;
 use ChatFlow\Exception\SceneNotFoundException;
@@ -85,6 +86,14 @@ class Context
     public function getText(): string
     {
         return $this->event->getText();
+    }
+
+    /**
+     * Whether the event was produced by the runtime (Application::run()) rather than by the user.
+     */
+    public function isSystem(): bool
+    {
+        return $this->event instanceof SystemEvent;
     }
 
     public function isAction(): bool

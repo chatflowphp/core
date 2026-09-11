@@ -55,6 +55,20 @@ final class ExceptionRegistryTest extends TestCase
         self::assertSame(['bot'], $trace);
     }
 
+    public function testDefaultHandlerAcknowledgesFailedButtonPressesAsAlerts(): void
+    {
+        $adapter = new FakePlatformAdapter();
+        $context = new Context(TestApp::event('c', actionId: 'menu:open'), $adapter, new Container());
+
+        (new ExceptionRegistry())->handle(new RuntimeException('secret detail'), $context);
+
+        $effects = $context->getOutboundEffects();
+        self::assertCount(1, $effects);
+        self::assertInstanceOf(\ChatFlow\Outbound\AckEffect::class, $effects[0]);
+        self::assertSame('An internal error occurred. Please try again later.', $effects[0]->getText());
+        self::assertTrue($effects[0]->isError());
+    }
+
     public function testDefaultHandlerRepliesWithASafeMessage(): void
     {
         $adapter = new FakePlatformAdapter();

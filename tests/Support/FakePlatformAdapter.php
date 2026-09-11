@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace ChatFlow\Tests\Support;
 
+use ChatFlow\Contracts\AfterHandleInterface;
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Core\Context;
+use ChatFlow\Core\Result;
 use ChatFlow\Outbound\AckEffect;
 use ChatFlow\Outbound\DeliveryResult;
 use ChatFlow\Outbound\OutboundEffectInterface;
@@ -15,8 +17,11 @@ use ChatFlow\Outbound\ReplyEffect;
 use ChatFlow\Platform\PlatformCapabilities;
 use InvalidArgumentException;
 
-final class FakePlatformAdapter implements PlatformAdapterInterface
+final class FakePlatformAdapter implements PlatformAdapterInterface, AfterHandleInterface
 {
+    /** @var list<array{conversation: string, status: string}> */
+    public array $afterHandle = [];
+
     /** @var list<string> */
     public array $deliveries = [];
 
@@ -88,6 +93,11 @@ final class FakePlatformAdapter implements PlatformAdapterInterface
         $this->downloads[] = $path;
 
         return $path;
+    }
+
+    public function afterHandle(Context $context, Result $result): void
+    {
+        $this->afterHandle[] = ['conversation' => $context->getConversationId(), 'status' => $result->getStatus()];
     }
 
     public function capabilities(): PlatformCapabilities

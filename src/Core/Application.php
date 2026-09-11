@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace ChatFlow\Core;
 
 use ChatFlow\Container\ContainerInterface;
+use ChatFlow\Contracts\AfterHandleInterface;
 use ChatFlow\Contracts\FlowRuntimeInterface;
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Contracts\RuntimeDependencyBinderInterface;
+use ChatFlow\Event\SystemEvent;
 use ChatFlow\Exception\ErrorHandlerInterface;
 use ChatFlow\Exception\ExceptionRegistry;
 use ChatFlow\Exception\LogicException;
@@ -24,6 +26,7 @@ use ChatFlow\Scene\ConversationManager;
 use ChatFlow\Scene\Events\RouteHandled;
 use ChatFlow\Scene\Events\RouteMissed;
 use ChatFlow\Scene\RootScene;
+use ChatFlow\Scene\SceneContext;
 use ChatFlow\Scene\SceneRegistry;
 use ChatFlow\Scene\SceneTransitions;
 use ChatFlow\Validation\ValidationRegistry;
@@ -34,10 +37,12 @@ use Throwable;
 /**
  * The runtime: one inbound event becomes exactly one tick of the conversation's state machine.
  *
- * Order of work for every event: bind request dependencies, resume the conversation, match a
- * route, run middleware around the tick, persist the conversation, deliver queued effects. When
- * anything fails the conversation is rolled back, queued effects are dropped and only the error
- * handler gets to reply.
+ * Order of work for every event: bind request dependencies, resume the conversation, apply a
+ * transition scheduled from outside (its own transaction), match a route, run middleware around
+ * the tick, persist the conversation, deliver queued effects. When the tick fails the
+ * conversation is rolled back, queued effects are dropped and only the error handler replies.
+ *
+ * @phpstan-import-type PendingTransition from SceneContext
  */
 class Application implements FlowRuntimeInterface
 {
@@ -94,56 +99,66 @@ class Application implements FlowRuntimeInterface
             'is_action' => $event->isAction(),
             'action_id' => $event->getActionId(),
             'text' => $event->getText(),
+            'system' => $context->isSystem(),
         ]);
 
         try {
-            $this->bindRuntimeDependencies($context);
-
-            $conversation = $this->conversations->resume($event->getConversationId());
-            $context->attachConversation($conversation);
-
-            $route ??= $this->router->match($event);
-            $this->recordTarget($context, $conversation, $route);
-
-            $ticked = false;
-            $result = (new Pipeline($this->container))
-                ->send($context)
-                ->through($this->collectMiddlewareStack($conversation, $route))
-                ->then(function (Context $ctx) use ($conversation, $route, &$ticked): Result {
-                    $ticked = true;
-
-                    return $this->tick($ctx, $conversation, $route);
-                });
-
-            if (!$result instanceof Result) {
-                throw new LogicException(\sprintf('Middleware must return %s, got %s.', Result::class, get_debug_type($result)));
-            }
-
-            if ($ticked && self::shouldPersist($conversation)) {
-                $conversation->persist();
-            }
-
-            return $this->flushOutboundEffects($context, $result);
+            $result = $this->process($context, $route);
         } catch (Throwable $exception) {
-            $context->clearOutboundEffects();
-            $this->record('handler.failed', $context->getConversationId(), [
-                'exception' => $exception::class,
-                'message' => $exception->getMessage(),
-            ]);
-            $this->logger->error('Application handling failed', [
+            $result = $this->fail($context, $exception);
+        }
+
+        try {
+            if ($this->adapter instanceof AfterHandleInterface) {
+                $this->adapter->afterHandle($context, $result);
+            }
+        } catch (Throwable $exception) {
+            $this->logger->warning('Adapter afterHandle hook failed', [
                 'exception' => $exception::class,
                 'message' => $exception->getMessage(),
                 'conversation_id' => $context->getConversationId(),
             ]);
-            $this->errorHandler->handle($exception, $context);
-
-            return $this->flushOutboundEffects(
-                $context,
-                Result::error($exception->getMessage(), ['exception' => $exception::class]),
-            );
         } finally {
             $this->container->flush();
         }
+
+        return $result;
+    }
+
+    /**
+     * Runs a handler inside a conversation without an inbound user event: schedulers, admin
+     * actions and other chats use it to enter scenes, leave them or send messages through the
+     * regular runtime, with middleware, persistence, rollback and delivery.
+     */
+    public function run(string $conversationId, callable $handler, string $reason = 'system'): Result
+    {
+        return $this->handle(
+            SystemEvent::forConversation($conversationId, $reason),
+            Route::custom('system:' . $reason, $handler, global: true),
+        );
+    }
+
+    /**
+     * Enters a scene now, from outside of a request. The scene's onEnter() runs and its messages
+     * are delivered to the conversation.
+     *
+     * @param array<string, mixed> $data
+     */
+    public function enter(string $conversationId, string $scene, array $data = [], ?string $title = null): Result
+    {
+        return $this->run($conversationId, static function (Context $ctx) use ($scene, $data, $title): void {
+            $ctx->enter($scene, $data, $title);
+        }, 'enter');
+    }
+
+    /**
+     * Leaves the current scene now, from outside of a request.
+     */
+    public function leave(string $conversationId): Result
+    {
+        return $this->run($conversationId, static function (Context $ctx): void {
+            $ctx->leave();
+        }, 'leave');
     }
 
     // -- FlowRuntimeInterface ------------------------------------------------------------------
@@ -275,6 +290,131 @@ class Application implements FlowRuntimeInterface
     }
 
     // -- internals -----------------------------------------------------------------------------
+
+    private function process(Context $context, ?Route $route): Result
+    {
+        $this->bindRuntimeDependencies($context);
+
+        $conversation = $this->conversations->resume($context->getConversationId());
+        $context->attachConversation($conversation);
+
+        $pending = $conversation->takePendingTransition();
+
+        if ($pending !== null) {
+            $applied = $this->applyPendingTransition($context, $conversation, $pending);
+            $conversation->persist();
+
+            if ($applied !== null) {
+                $delivered = $this->flushOutboundEffects($context, $applied);
+
+                if ($delivered->isError() || !$pending['handleTrigger']) {
+                    return $delivered;
+                }
+            }
+        }
+
+        $route ??= $this->router->match($context->getEvent());
+        $this->recordTarget($context, $conversation, $route);
+
+        $ticked = false;
+        $result = (new Pipeline($this->container))
+            ->send($context)
+            ->through($this->collectMiddlewareStack($conversation, $route))
+            ->then(function (Context $ctx) use ($conversation, $route, &$ticked): Result {
+                $ticked = true;
+
+                return $this->tick($ctx, $conversation, $route);
+            });
+
+        if (!$result instanceof Result) {
+            throw new LogicException(\sprintf('Middleware must return %s, got %s.', Result::class, get_debug_type($result)));
+        }
+
+        if ($ticked && self::shouldPersist($conversation)) {
+            $conversation->persist();
+        }
+
+        return $this->flushOutboundEffects($context, $result);
+    }
+
+    private function fail(Context $context, Throwable $exception): Result
+    {
+        $context->clearOutboundEffects();
+        $this->record('handler.failed', $context->getConversationId(), [
+            'exception' => $exception::class,
+            'message' => $exception->getMessage(),
+        ]);
+        $this->logger->error('Application handling failed', [
+            'exception' => $exception::class,
+            'message' => $exception->getMessage(),
+            'conversation_id' => $context->getConversationId(),
+        ]);
+
+        try {
+            $this->errorHandler->handle($exception, $context);
+        } catch (Throwable $handlerException) {
+            $context->clearOutboundEffects();
+            $this->logger->error('Error handler failed', [
+                'exception' => $handlerException::class,
+                'message' => $handlerException->getMessage(),
+                'conversation_id' => $context->getConversationId(),
+            ]);
+        }
+
+        return $this->flushOutboundEffects(
+            $context,
+            Result::error($exception->getMessage(), ['exception' => $exception::class]),
+        );
+    }
+
+    /**
+     * Applies a transition scheduled with enterLater()/leaveLater() as its own transaction, before
+     * the event is dispatched. A failed transition is dropped, recorded, and the event is handled
+     * as if nothing had been scheduled, so a conversation can never get stuck on it.
+     *
+     * @param PendingTransition $pending
+     *
+     * @return Result|null The outcome, or null when the transition failed and normal handling continues.
+     */
+    private function applyPendingTransition(Context $context, Conversation $conversation, array $pending): ?Result
+    {
+        try {
+            $conversation->withRequest($context, static function () use ($conversation, $pending): void {
+                if ($pending['action'] === 'leave') {
+                    $conversation->leave();
+
+                    return;
+                }
+
+                $conversation->enter((string) $pending['scene'], $pending['data'], $pending['title']);
+            });
+        } catch (Throwable $exception) {
+            $context->clearOutboundEffects();
+            $this->record('scene.pending_failed', $context->getConversationId(), [
+                'action' => $pending['action'],
+                'scene' => $pending['scene'],
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+            $this->logger->warning('Pending scene transition failed and was dropped', [
+                'conversation_id' => $context->getConversationId(),
+                'action' => $pending['action'],
+                'scene' => $pending['scene'],
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $this->record('scene.pending_applied', $context->getConversationId(), [
+            'action' => $pending['action'],
+            'scene' => $pending['scene'],
+            'handle_trigger' => $pending['handleTrigger'],
+        ]);
+
+        return Result::success($pending['action'] === 'enter' ? 'scene_entered' : 'scene_left');
+    }
 
     private function tick(Context $context, Conversation $conversation, ?Route $route): Result
     {

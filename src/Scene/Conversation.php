@@ -13,6 +13,8 @@ use ChatFlow\Routing\Route;
 
 /**
  * One conversation: the state machine restored for a conversation id, its context and history.
+ *
+ * @phpstan-import-type PendingTransition from SceneContext
  */
 final class Conversation
 {
@@ -71,6 +73,47 @@ final class Conversation
         } finally {
             $this->context->unbindRequest();
         }
+    }
+
+    /**
+     * Runs an operation with the request bound to the conversation, so that scene hooks can reply.
+     * Used by the runtime for transitions that happen outside of a tick, such as pending entries.
+     *
+     * @template T
+     *
+     * @param callable(): T $operation
+     *
+     * @return T
+     *
+     * @internal
+     */
+    public function withRequest(Context $request, callable $operation): mixed
+    {
+        $this->context->bindRequest($request);
+
+        try {
+            return $operation();
+        } finally {
+            $this->context->unbindRequest();
+        }
+    }
+
+    /**
+     * Returns the pending transition recorded by enterLater()/leaveLater() and removes it.
+     *
+     * @return PendingTransition|null
+     *
+     * @internal
+     */
+    public function takePendingTransition(): ?array
+    {
+        $pending = $this->context->getPendingTransition();
+
+        if ($pending !== null) {
+            $this->context->clearPendingTransition();
+        }
+
+        return $pending;
     }
 
     public function persist(): void

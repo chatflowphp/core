@@ -9,6 +9,7 @@ use Automata\Exception\AutomataException;
 use Automata\Machine\StateMachine;
 use Automata\Snapshot\Session;
 use Automata\State\StateRegistry;
+use ChatFlow\Exception\SceneNotFoundException;
 use ChatFlow\Observability\NullRuntimeObserver;
 use ChatFlow\Observability\RuntimeEvent;
 use ChatFlow\Observability\RuntimeObserverInterface;
@@ -20,6 +21,8 @@ use Psr\Clock\ClockInterface;
 
 /**
  * Builds the state machine of a conversation from the registered scenes and resumes it from storage.
+ *
+ * @phpstan-import-type PendingTransition from SceneContext
  */
 final class ConversationManager
 {
@@ -63,6 +66,65 @@ final class ConversationManager
             $this->store->delete($conversationId);
 
             return $this->restore($conversationId);
+        }
+    }
+
+    /**
+     * Schedules a scene entry from outside of a request: a scheduler, an admin action or another
+     * chat. Nothing is sent now; the transition runs when the conversation receives its next
+     * event, inside the runtime with a real request, so the scene's onEnter() can reply.
+     *
+     * @param string $scene Scene class or scene id.
+     * @param array<string, mixed> $data Merged into the session when the transition runs.
+     * @param bool $handleTrigger Whether the event that triggers the transition is then handled by
+     *                            the new scene (true) or consumed as the trigger only (false).
+     *
+     * @throws SceneNotFoundException
+     */
+    public function enterLater(string $conversationId, string $scene, array $data = [], bool $handleTrigger = false, ?string $title = null): void
+    {
+        $conversation = $this->resume($conversationId);
+        $conversation->getContext()->setPendingTransition([
+            'action' => 'enter',
+            'scene' => $this->scenes->resolveId($scene),
+            'data' => $data,
+            'title' => $title,
+            'handleTrigger' => $handleTrigger,
+        ]);
+        $conversation->persist();
+    }
+
+    /**
+     * Schedules leaving the current scene; applied on the conversation's next event.
+     */
+    public function leaveLater(string $conversationId, bool $handleTrigger = true): void
+    {
+        $conversation = $this->resume($conversationId);
+        $conversation->getContext()->setPendingTransition([
+            'action' => 'leave',
+            'scene' => null,
+            'data' => [],
+            'title' => null,
+            'handleTrigger' => $handleTrigger,
+        ]);
+        $conversation->persist();
+    }
+
+    /**
+     * @return PendingTransition|null
+     */
+    public function getPending(string $conversationId): ?array
+    {
+        return $this->resume($conversationId)->getContext()->getPendingTransition();
+    }
+
+    public function clearPending(string $conversationId): void
+    {
+        $conversation = $this->resume($conversationId);
+
+        if ($conversation->getContext()->hasPendingTransition()) {
+            $conversation->getContext()->clearPendingTransition();
+            $conversation->persist();
         }
     }
 

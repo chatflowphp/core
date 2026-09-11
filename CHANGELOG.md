@@ -31,7 +31,12 @@ states, every inbound event is one tick. There is no backward compatibility with
   scoped instances into handlers, and self-registration of the container.
 - `DatabaseStorage::createTableSql()`.
 - `UnsupportedInputException` for adapters that cannot map an update to a conversation.
-- Runtime events `scene.entered`, `scene.left`, `conversation.reset`.
+- Runtime events `scene.entered`, `scene.left`, `conversation.reset`, `scene.pending_applied`,
+  `scene.pending_failed`.
+- Scene transitions from outside a request: `ConversationManager::enterLater()` /
+  `leaveLater()` apply on the conversation's next event; `Application::enter()` / `leave()` /
+  `run()` apply now through a `SystemEvent` tick with delivery. `Context::isSystem()`.
+- `AfterHandleInterface` for adapters that need to act after every handled event.
 
 ### Changed
 
@@ -43,8 +48,9 @@ states, every inbound event is one tick. There is no backward compatibility with
 - Scenes are stateless services created once through the container.
 - Storage drivers store records exactly as given; the conversation record is the automata
   snapshot. Old 1.x records are discarded on first access.
-- `ExceptionRegistry` resolves handlers by specificity (class, parents, interfaces) and takes a
-  `bool $debug` flag instead of a config object.
+- `ExceptionRegistry` resolves handlers by specificity (class, parents, interfaces), takes a
+  `bool $debug` flag instead of a config object, and acknowledges failed button presses as alerts.
+- `ext-mbstring` is declared as a requirement.
 - Commands match the group form `/command@bot_username`.
 - Events, views and runtime events normalize their payloads once on construction.
 - Tooling: PHPStan level max with strict rules, PER-CS 2.0, strict PHPUnit configuration,

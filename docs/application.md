@@ -53,9 +53,26 @@ $result = $application->handle($event, Route::custom('media', $handler));
 The second form skips the router and uses the given route. A non-global custom route runs only
 when no scene is active; mark it `global` to run it inside scenes as well.
 
-Order of work: bind request dependencies, resume the conversation, match the route, run
-middleware around one tick, persist, deliver effects, flush the container scope. See
-[Architecture](architecture.md).
+Order of work: bind request dependencies, resume the conversation, apply a pending transition
+(its own transaction), match the route, run middleware around one tick, persist, deliver effects,
+run the adapter hook, flush the container scope. See [Architecture](architecture.md).
+
+## System Ticks
+
+```php
+$application->run($conversationId, $handler, reason: 'report');
+$application->enter($conversationId, ReviewScene::class, ['id' => 42]);
+$application->leave($conversationId);
+```
+
+`run()` handles a `SystemEvent` with a global custom route. Everything else is the same as for
+user events, so schedulers and admin tools act on conversations through one code path.
+
+## Adapter Hook
+
+An adapter may implement `AfterHandleInterface`. Its `afterHandle($context, $result)` runs after
+every handled event, also after failures and delivery errors, before the container scope is
+flushed. The Telegram adapter uses it to answer callback queries nobody acknowledged.
 
 ## Results
 
@@ -64,6 +81,7 @@ middleware around one tick, persist, deliver effects, flush the container scope.
 | `success` | `route_processed` | a route ran in the root scene |
 | `success` | `global_route_processed` | a global route ran inside a scene |
 | `success` | `scene_processed` | the active scene consumed the event |
+| `success` | `scene_entered` / `scene_left` | a pending transition ran and consumed the triggering event |
 | `no_match` | `null` | no scene is active and no route matched |
 | `error` | exception message | a handler, scene or middleware threw |
 | `error` | `delivery_failed` | the adapter could not deliver an effect |

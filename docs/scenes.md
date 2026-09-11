@@ -123,6 +123,39 @@ $ctx->leave();
 
 Allowed paths can be restricted; see [Transitions](transitions.md).
 
+## Entering Scenes From Outside A Request
+
+Schedulers, admin panels and other chats can move a conversation without an inbound event.
+
+```php
+// Ask now: runs a system tick, onEnter() sends its question through the adapter.
+$application->enter($chatId, ReviewScene::class, ['campaign' => 42]);
+$application->leave($chatId);
+$application->run($chatId, static function (Context $ctx): void {
+    $ctx->reply('Your report is ready');
+    $ctx->enter(ReviewScene::class);
+});
+
+// Ask later: record the intent, apply it on the conversation's next event.
+$application->getConversations()->enterLater($chatId, ReviewScene::class, ['campaign' => 42]);
+$application->getConversations()->leaveLater($chatId);
+```
+
+`enter()`, `leave()` and `run()` are immediate: a `SystemEvent` (no text, no user, no message
+reference) goes through the regular runtime with middleware, persistence, rollback and delivery,
+so `onEnter()` can reply. `$ctx->isSystem()` tells handlers apart from user events.
+
+`enterLater()` and `leaveLater()` store a pending transition in the snapshot. When the next event
+arrives, the transition runs first as its own transaction: the target's `onEnter()` replies with a
+real request context, the result is persisted and delivered, and then the event is consumed
+(`handleTrigger: false`, the default) or handed to the new scene (`handleTrigger: true`). A
+pending transition that fails (forbidden by the transition table, `onEnter()` throwing) is
+dropped and recorded as `scene.pending_failed`; the event is handled as if nothing had been
+scheduled, so a conversation can never get stuck on it.
+
+Use `enter()` when the system already knows what to say, `enterLater()` when the flow should start
+silently on the user's next contact.
+
 ## Scene Ids
 
 The default id is the class name. Override `getId()` to keep stored conversations valid when the

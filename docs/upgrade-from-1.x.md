@@ -46,7 +46,8 @@ properties.
 | `$ctx->session()->getCurrentScene()` | `$ctx->getCurrentScene()` (returns `RootScene::ID` instead of `null`) |
 | `$ctx->session()->hasScene()` | `$ctx->inScene()` |
 | `$ctx->session()->pushHistory()` etc. | `$ctx->session()->getHistory()`, `pushHistory()`, `popHistory()`, `clearHistory()` |
-| `requestScene()`, `requestExit()`, pending flags | removed; `enter()`, `back()`, `leave()` transition immediately |
+| `requestScene()`, `requestExit()` inside handlers | `enter()`, `back()`, `leave()` transition immediately |
+| `StateManager::enterScene()` / `exitScene()` from outside a request | `ConversationManager::enterLater()` / `leaveLater()` (applied on the next event) or `Application::enter()` / `leave()` / `run()` (applied now, with delivery) |
 | `$ctx->getSession()` (nullable) | `$ctx->session()` (throws outside of `Application::handle()`) |
 
 ## Navigation Semantics
@@ -56,7 +57,8 @@ properties.
 - `back()` with empty history goes to the root scene (1.x did nothing).
 - `leave()` clears history (1.x kept it).
 - A failing handler no longer sends the replies queued before the failure, and the scene and
-  session are restored.
+  session are restored. The default error handler acknowledges a failed button press as an
+  alert instead of sending a message.
 
 ## Application
 

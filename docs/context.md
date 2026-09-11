@@ -12,6 +12,7 @@ $ctx->getConversationId();   // string, the storage key
 $ctx->getUser();             // ?UserRef
 $ctx->getUserId();           // string|int|null
 $ctx->getText();
+$ctx->isSystem();            // produced by Application::run(), not by a user
 $ctx->isAction();
 $ctx->getActionId();
 $ctx->getActionPayload();

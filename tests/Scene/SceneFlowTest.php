@@ -15,6 +15,7 @@ use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Tests\Support\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\MutableClock;
+use ChatFlow\Tests\Support\Scenes\BrokenScene;
 use ChatFlow\Tests\Support\Scenes\CheckoutScene;
 use ChatFlow\Tests\Support\Scenes\CustomMiddlewareScene;
 use ChatFlow\Tests\Support\Scenes\DetailsScene;
@@ -243,7 +244,8 @@ final class SceneFlowTest extends TestCase
 
         self::assertTrue($result->isError());
         self::assertSame(['Menu:leave', 'Details:enter'], $this->log->all(), 'the transition ran before the failure');
-        self::assertSame([self::INTERNAL_ERROR], $this->replies());
+        self::assertSame([], $this->replies(), 'nothing queued before the failure is sent');
+        self::assertSame([['text' => self::INTERNAL_ERROR, 'error' => true]], $this->adapter->acks, 'a failed button press is acknowledged as an alert');
         self::assertSame(MenuScene::class, $this->currentScene('c'));
         self::assertFalse($this->session('c')->has('poisoned'));
         self::assertSame([], $this->session('c')->getHistory());
@@ -374,6 +376,133 @@ final class SceneFlowTest extends TestCase
 
         self::assertSame(['1', '2'], $this->replies());
         self::assertSame(['/count', '/count again'], $this->session('c')->getList('log'));
+    }
+
+
+    public function testScheduledEntryIsAppliedOnTheNextEventAndConsumesIt(): void
+    {
+        $this->registerMenuFlow();
+        $this->app->fallback(static function (Context $ctx): void {
+            $ctx->reply('fallback');
+        });
+
+        $this->app->getConversations()->enterLater('c', MenuScene::class, ['source' => 'scheduler'], title: 'Home');
+
+        self::assertSame(['c'], $this->storage->keys(), 'the intent is persisted immediately');
+        self::assertSame('enter', $this->app->getConversations()->getPending('c')['action'] ?? null);
+        self::assertSame(RootScene::ID, $this->currentScene('c'), 'nothing moves until the next event');
+
+        $result = $this->app->handle(TestApp::event('c', 'hello'));
+
+        self::assertSame('scene_entered', $result->getMessage());
+        self::assertSame(['Menu screen'], $this->replies());
+        self::assertSame(['Menu:enter'], $this->log->all(), 'the triggering text is consumed, not handled');
+        self::assertSame(MenuScene::class, $this->currentScene('c'));
+        self::assertSame('scheduler', $this->session('c')->get('source'));
+        self::assertNull($this->app->getConversations()->getPending('c'));
+        self::assertContains('scene.pending_applied', $this->observer->getNames());
+    }
+
+    public function testScheduledEntryCanHandTheTriggeringEventToTheNewScene(): void
+    {
+        $this->registerMenuFlow();
+
+        $this->app->getConversations()->enterLater('c', MenuScene::class, handleTrigger: true);
+        $result = $this->app->handle(TestApp::event('c', 'hello'));
+
+        self::assertSame('scene_processed', $result->getMessage());
+        self::assertSame(['Menu:enter', 'Menu:handle:hello'], $this->log->all());
+        self::assertSame(['Menu screen', 'Menu got hello'], $this->replies());
+    }
+
+    public function testScheduledLeaveReturnsToRootBeforeHandlingTheEvent(): void
+    {
+        $this->registerMenuFlow();
+        $this->app->fallback(static function (Context $ctx): void {
+            $ctx->reply('fallback');
+        });
+
+        $this->app->handle(TestApp::event('c', '/start'));
+        $this->app->getConversations()->leaveLater('c');
+        $this->log->clear();
+
+        $this->app->handle(TestApp::event('c', 'hi'));
+
+        self::assertSame(['Menu:leave'], $this->log->all());
+        self::assertSame('fallback', $this->lastReply());
+        self::assertSame(RootScene::ID, $this->currentScene('c'));
+    }
+
+    public function testScheduledEntryDeniedByTransitionsIsDroppedAndTheEventIsHandled(): void
+    {
+        $this->registerMenuFlow();
+        $this->app->allowTransition(RootScene::ID, MenuScene::class);
+        $this->app->fallback(static function (Context $ctx): void {
+            $ctx->reply('fallback');
+        });
+
+        $this->app->getConversations()->enterLater('c', DetailsScene::class);
+        $result = $this->app->handle(TestApp::event('c', 'hi'));
+
+        self::assertTrue($result->isNoMatch() || $result->isSuccess());
+        self::assertSame(['fallback'], $this->replies());
+        self::assertSame(RootScene::ID, $this->currentScene('c'));
+        self::assertNull($this->app->getConversations()->getPending('c'), 'a failed pending transition is dropped, not retried');
+        self::assertContains('scene.pending_failed', $this->observer->getNames());
+    }
+
+    public function testScheduledEntryWhoseOnEnterFailsIsDroppedOnce(): void
+    {
+        $this->app->registerScene(BrokenScene::class);
+        $this->app->fallback(static function (Context $ctx): void {
+            $ctx->reply('fallback');
+        });
+
+        $this->app->getConversations()->enterLater('c', BrokenScene::class);
+        $this->app->handle(TestApp::event('c', 'first'));
+        $this->app->handle(TestApp::event('c', 'second'));
+
+        self::assertSame(['fallback', 'fallback'], $this->replies());
+        self::assertSame(RootScene::ID, $this->currentScene('c'));
+        self::assertSame(1, \count(array_filter($this->observer->getNames(), static fn(string $name): bool => $name === 'scene.pending_failed')));
+    }
+
+    public function testScenesCanBeEnteredAndLeftImmediatelyFromOutside(): void
+    {
+        $this->registerMenuFlow();
+
+        $entered = $this->app->enter('c', MenuScene::class, ['source' => 'cron']);
+
+        self::assertTrue($entered->isSuccess());
+        self::assertSame(['Menu screen'], $this->replies());
+        self::assertSame(MenuScene::class, $this->currentScene('c'));
+        self::assertSame('cron', $this->session('c')->get('source'));
+
+        $this->app->run('c', static function (Context $ctx): void {
+            $ctx->reply($ctx->isSystem() ? 'system tick in ' . $ctx->getCurrentScene() : 'user tick');
+        });
+        self::assertSame('system tick in ' . MenuScene::class, $this->lastReply());
+
+        $left = $this->app->leave('c');
+
+        self::assertTrue($left->isSuccess());
+        self::assertSame(RootScene::ID, $this->currentScene('c'));
+        self::assertContains('Menu:leave', $this->log->all());
+    }
+
+    public function testClearPendingForgetsAScheduledTransition(): void
+    {
+        $this->registerMenuFlow();
+        $this->app->getConversations()->enterLater('c', MenuScene::class);
+        $this->app->getConversations()->clearPending('c');
+        $this->app->fallback(static function (Context $ctx): void {
+            $ctx->reply('fallback');
+        });
+
+        $this->app->handle(TestApp::event('c', 'hi'));
+
+        self::assertSame(['fallback'], $this->replies());
+        self::assertSame(RootScene::ID, $this->currentScene('c'));
     }
 
     private function createApp(?int $ttlSeconds = null): Application

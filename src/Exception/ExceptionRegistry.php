@@ -102,7 +102,13 @@ class ExceptionRegistry implements ErrorHandlerInterface
         }
 
         try {
-            $context->reply($message);
+            // A failed button press is acknowledged as an alert so the client stops waiting;
+            // anything else gets a message.
+            if ($context->isAction()) {
+                $context->ack($message, true);
+            } else {
+                $context->reply($message);
+            }
         } catch (Throwable) {
             // Replying is best-effort: the platform may not accept messages in this context.
         }

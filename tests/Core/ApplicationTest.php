@@ -236,6 +236,7 @@ final class ApplicationTest extends TestCase
         self::assertSame('exploded', $result->getMessage());
         self::assertSame([self::INTERNAL_ERROR], array_map(static fn(View $view): string => $view->getText(), $adapter->replies));
         self::assertContains('handler.failed', $observer->getNames());
+        self::assertSame([['conversation' => 'conv-fail', 'status' => 'error']], $adapter->afterHandle, 'the adapter hook runs after failures too');
     }
 
     public function testCustomErrorHandlersAreUsed(): void

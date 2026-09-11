@@ -16,17 +16,21 @@ For every inbound event, `Application::handle()`:
 
 1. creates a `Context` and binds it into the container's request scope;
 2. resumes the conversation: loads the snapshot, or starts the machine in the root scene;
-3. matches a route (adapters may pass one explicitly);
-4. records the target for observability;
-5. builds the middleware stack: global middleware, the active scene's middleware, and the route's
+3. applies a transition scheduled with `enterLater()`/`leaveLater()` as its own transaction,
+   persists and delivers its messages, and stops here unless the event should be handled too;
+4. matches a route (adapters may pass one explicitly);
+5. records the target for observability;
+6. builds the middleware stack: global middleware, the active scene's middleware, and the route's
    middleware when the route will run;
-6. runs the pipeline around one machine tick;
-7. persists the snapshot when the tick ran and the conversation has something worth storing;
-8. delivers the queued outbound effects through the adapter, in order;
-9. flushes the container's request scope.
+7. runs the pipeline around one machine tick;
+8. persists the snapshot when the tick ran and the conversation has something worth storing;
+9. delivers the queued outbound effects through the adapter, in order;
+10. runs the adapter's `afterHandle()` hook, if it has one, and flushes the container's request
+    scope.
 
-If anything throws before step 8, the machine has already rolled back its state and context, the
-effect queue is cleared, and the error handler is the only code that may reply.
+If anything throws before step 9, the machine has already rolled back its state and context, the
+effect queue is cleared, and the error handler is the only code that may reply. A failed button
+press is acknowledged as an alert by the default error handler, so the client stops waiting.
 
 ## What Happens Inside The Tick
 

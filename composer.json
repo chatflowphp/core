@@ -19,6 +19,7 @@
     },
     "require": {
         "php": "^8.2",
+        "ext-mbstring": "*",
         "chatflowphp/automata": "^2.0",
         "php-di/php-di": "^7.0",
         "psr/clock": "^1.0",
