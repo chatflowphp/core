@@ -18,6 +18,18 @@ Every method returns the `Route`, which accepts middleware:
 $application->onCommand('admin', $handler)->middleware(AdminOnlyMiddleware::class);
 ```
 
+## Command Arguments
+
+A command route matches with or without an argument; the handler reads it from the context:
+
+```php
+$application->onCommand('start', static function (Context $ctx): void {
+    $referral = $ctx->getCommandArgument();   // "ref_abc123" for "/start ref_abc123"
+});
+```
+
+`Route::commandArgument('start', $text)` does the same parsing outside a handler.
+
 ## Where Routes Run
 
 Routes run in the root scene, that is, when no scene is active.

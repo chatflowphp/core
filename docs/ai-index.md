@@ -60,6 +60,9 @@ final class PhoneScene extends BaseScene
   `render()` for screen updates, `ack()` for button feedback.
 - Session values and payloads: scalars, null, arrays, backed enums only.
 - Interaction handlers are method names, never closures.
+- Deep links and command arguments: `$ctx->getCommandArgument()`.
+- Localization: register `ChatFlow\I18n\TranslatorInterface` in the container, add
+  `LocaleMiddleware`, translate with `$ctx->t('id', ['name' => $value])`.
 - Do not call vendor APIs from core code; adapter classes stay in adapter packages.
 - Inspect state in tests with `$application->getConversations()->resume($id)`.
 
@@ -77,3 +80,5 @@ final class PhoneScene extends BaseScene
 | logging | `JsonlRuntimeObserver` |
 | validation | `validate()` on `ask()` or a custom validator |
 | incoming file | `$ctx->downloadAttachment()` |
+| deep link payload | `$ctx->getCommandArgument()` |
+| translated text | `$ctx->t()` with `LocaleMiddleware` |

@@ -23,6 +23,17 @@ $ctx->getMessageRef();       // ?MessageRef
 $ctx->getMetadata();
 ```
 
+## Matched Route And Command Arguments
+
+```php
+$ctx->getRoute();              // ?Route, the route the runtime matched
+$ctx->getCommandArgument();    // "ref_abc123" for "/start ref_abc123"
+```
+
+`getCommandArgument()` returns the text after the command, which is what Telegram deep links
+carry. It handles the group form as well (`/start@my_bot ref_abc123`) and returns an empty string
+when the event was not routed to a command.
+
 ## Outbound Effects
 
 ```php
@@ -89,6 +100,17 @@ $ctx->ask('Enter email')
 
 `ask()` sends the question and stores an interaction in the session. The next update from the
 conversation goes through the fallbacks, then the validators, then the handler.
+
+## Localization
+
+```php
+$ctx->t('greeting', ['name' => 'Alex']);   // translated in the locale of this event
+$ctx->getLocale();                         // resolved by LocaleMiddleware, or null
+$ctx->setLocale('ru');
+```
+
+`t()` needs a `ChatFlow\I18n\TranslatorInterface` in the container. See
+[Localization](i18n.md).
 
 ## Request Items
 

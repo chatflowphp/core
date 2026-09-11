@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- `Context::getRoute()` and `Context::getCommandArgument()`, plus `Route::commandArgument()`:
+  handlers read the argument of the matched command, which is what deep links carry
+  ("/start ref_abc123").
+- `ChatFlow\I18n`: `TranslatorInterface` with `ArrayTranslator` and `SymfonyTranslatorAdapter`,
+  locale resolution through `LocaleResolverInterface`, `SessionLocaleResolver` and
+  `ChainLocaleResolver`, `Middleware\LocaleMiddleware`, and `Context::t()` / `getLocale()` /
+  `setLocale()`. See `docs/i18n.md`.
+
 ## [2.0.0] - 2026-09-10
 
 A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are

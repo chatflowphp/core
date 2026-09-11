@@ -44,3 +44,5 @@ Nothing is persisted in that case. Queue a reply first if the user should be tol
 - `LoggerMiddleware`: logs every request and its duration.
 - `RateLimitMiddleware`: soft per-user limit backed by any storage driver, with an optional
   rejection message.
+- `LocaleMiddleware`: resolves the locale of the event through a `LocaleResolverInterface` and
+  puts it on the context for `$ctx->t()`. See [Localization](i18n.md).
