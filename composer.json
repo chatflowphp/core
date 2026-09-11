@@ -3,7 +3,13 @@
     "description": "Platform-neutral conversational runtime for PHP: scenes as states on top of chatflowphp/automata.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["chatbot", "conversation", "state-machine", "scenes", "telegram"],
+    "keywords": [
+        "chatbot",
+        "conversation",
+        "state-machine",
+        "scenes",
+        "telegram"
+    ],
     "homepage": "https://github.com/chatflowphp/core",
     "authors": [
         {
@@ -31,11 +37,13 @@
         "phpstan/phpstan": "^2.1",
         "phpstan/phpstan-deprecation-rules": "^2.0",
         "phpstan/phpstan-strict-rules": "^2.0",
-        "phpunit/phpunit": "^10.5"
+        "phpunit/phpunit": "^10.5",
+        "symfony/translation-contracts": "^3.0"
     },
     "suggest": {
         "ext-pdo": "Required for PDO-backed session storage.",
-        "ext-redis": "Required for Redis-based session storage."
+        "ext-redis": "Required for Redis-based session storage.",
+        "symfony/translation-contracts": "Required by SymfonyTranslatorAdapter to reuse an existing symfony/translation catalogue."
     },
     "autoload": {
         "psr-4": {

@@ -12,9 +12,11 @@ use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Event\MessageRef;
 use ChatFlow\Event\SystemEvent;
 use ChatFlow\Event\UserRef;
+use ChatFlow\Exception\LogicException;
 use ChatFlow\Exception\SceneException;
 use ChatFlow\Exception\SceneNotFoundException;
 use ChatFlow\Exception\UnsupportedCapabilityException;
+use ChatFlow\I18n\TranslatorInterface;
 use ChatFlow\Observability\NullRuntimeObserver;
 use ChatFlow\Observability\RuntimeEvent;
 use ChatFlow\Observability\RuntimeObserverInterface;
@@ -47,6 +49,8 @@ class Context
     private ?Conversation $conversation = null;
 
     private ?Route $route = null;
+
+    public const LOCALE_KEY = 'locale';
 
     private readonly RuntimeObserverInterface $runtimeObserver;
 
@@ -329,6 +333,54 @@ class Context
     public function bindRoute(?Route $route): void
     {
         $this->route = $route;
+    }
+
+    // -- localization --------------------------------------------------------------------------
+
+    /**
+     * The locale for this event, set by LocaleMiddleware. Null when nothing resolved one.
+     */
+    public function getLocale(): ?string
+    {
+        $locale = $this->get(self::LOCALE_KEY);
+
+        return \is_string($locale) && $locale !== '' ? $locale : null;
+    }
+
+    public function setLocale(?string $locale): void
+    {
+        if ($locale === null || $locale === '') {
+            $this->remove(self::LOCALE_KEY);
+
+            return;
+        }
+
+        $this->set(self::LOCALE_KEY, $locale);
+    }
+
+    /**
+     * Translates a message id in the locale of this event.
+     *
+     * @param array<string, string|int|float|bool|null> $parameters
+     *
+     * @throws LogicException When no translator is registered in the container
+     */
+    public function t(string $id, array $parameters = [], ?string $locale = null): string
+    {
+        if (!$this->container->has(TranslatorInterface::class)) {
+            throw new LogicException(\sprintf(
+                'No %s is registered in the container; register one to use Context::t().',
+                TranslatorInterface::class,
+            ));
+        }
+
+        $translator = $this->container->get(TranslatorInterface::class);
+
+        if (!$translator instanceof TranslatorInterface) {
+            throw new LogicException(\sprintf('The container entry for %s is not a translator.', TranslatorInterface::class));
+        }
+
+        return $translator->trans($id, $parameters, $locale ?? $this->getLocale());
     }
 
     public function set(string $key, mixed $value): void
