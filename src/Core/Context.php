@@ -22,6 +22,7 @@ use ChatFlow\Outbound\AckEffect;
 use ChatFlow\Outbound\OutboundEffectInterface;
 use ChatFlow\Outbound\RenderEffect;
 use ChatFlow\Outbound\ReplyEffect;
+use ChatFlow\Routing\Route;
 use ChatFlow\Scene\Conversation;
 use ChatFlow\Scene\Interaction;
 use ChatFlow\Scene\SceneContext;
@@ -44,6 +45,8 @@ class Context
     private array $effects = [];
 
     private ?Conversation $conversation = null;
+
+    private ?Route $route = null;
 
     private readonly RuntimeObserverInterface $runtimeObserver;
 
@@ -298,6 +301,35 @@ class Context
     }
 
     // -- request-scoped items ------------------------------------------------------------------
+
+    /**
+     * The route the runtime chose for this event, or null when a scene handled it.
+     */
+    public function getRoute(): ?Route
+    {
+        return $this->route;
+    }
+
+    /**
+     * The argument of the matched command: "ref_abc123" for "/start ref_abc123". Empty when the
+     * command carries no argument or the event was not routed to a command.
+     */
+    public function getCommandArgument(): string
+    {
+        if ($this->route === null || $this->route->getType() !== Route::COMMAND) {
+            return '';
+        }
+
+        return Route::commandArgument($this->route->getPattern(), $this->getText());
+    }
+
+    /**
+     * Records the route the runtime matched. Called by the Application before the tick.
+     */
+    public function bindRoute(?Route $route): void
+    {
+        $this->route = $route;
+    }
 
     public function set(string $key, mixed $value): void
     {

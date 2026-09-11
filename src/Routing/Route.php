@@ -109,6 +109,27 @@ final class Route
     }
 
     /**
+     * The text after "/name" or "/name@bot": deep link payloads ("/start ref_abc123") and command
+     * arguments. Empty when the command carries no argument.
+     */
+    public static function commandArgument(string $command, string $text): string
+    {
+        $command = ltrim($command, '/');
+
+        if ($command === '') {
+            return '';
+        }
+
+        $pattern = '~^/' . preg_quote($command, '~') . '(?:@[A-Za-z0-9_]+)?(?:\s+(?<argument>.*))?$~us';
+
+        if (preg_match($pattern, $text, $matches) !== 1) {
+            return '';
+        }
+
+        return trim($matches['argument'] ?? '');
+    }
+
+    /**
      * @param MiddlewareInterface|class-string<MiddlewareInterface>|list<MiddlewareInterface|class-string<MiddlewareInterface>> $middleware
      */
     public function middleware(MiddlewareInterface|string|array $middleware): self

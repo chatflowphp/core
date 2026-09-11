@@ -84,4 +84,27 @@ final class RouteTest extends TestCase
 
         self::assertSame([$middleware, $middleware::class, $middleware], $route->getMiddlewares());
     }
+
+    #[DataProvider('commandArguments')]
+    public function testCommandArgument(string $text, string $expected): void
+    {
+        self::assertSame($expected, Route::commandArgument('start', $text));
+        self::assertSame($expected, Route::commandArgument('/start', $text));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function commandArguments(): iterable
+    {
+        yield 'no argument' => ['/start', ''];
+        yield 'deep link payload' => ['/start ref_abc123', 'ref_abc123'];
+        yield 'group form' => ['/start@my_bot ref_abc123', 'ref_abc123'];
+        yield 'several words' => ['/start one two', 'one two'];
+        yield 'extra spaces' => ['/start   padded  ', 'padded'];
+        yield 'newline' => ["/start\nsecond line", 'second line'];
+        yield 'other command' => ['/stop now', ''];
+        yield 'not a command' => ['start now', ''];
+        yield 'empty command' => ['/', ''];
+    }
 }

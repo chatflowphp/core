@@ -314,6 +314,7 @@ class Application implements FlowRuntimeInterface
         }
 
         $route ??= $this->router->match($context->getEvent());
+        $context->bindRoute($route);
         $this->recordTarget($context, $conversation, $route);
 
         $ticked = false;

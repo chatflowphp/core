@@ -404,4 +404,39 @@ final class ApplicationTest extends TestCase
         self::assertTrue($application->handle(TestApp::event('conv-min', '/ping'))->isSuccess());
         self::assertSame('pong', $adapter->replies[0]->getText());
     }
+
+    public function testCommandHandlersReadTheDeepLinkArgument(): void
+    {
+        $adapter = new FakePlatformAdapter();
+        $application = TestApp::create($adapter);
+
+        $application->onCommand('start', static function (Context $ctx): void {
+            $ctx->reply(View::text('ref=' . $ctx->getCommandArgument()));
+        });
+
+        $application->handle(TestApp::event('conv-1', '/start@my_bot ref_abc123'));
+
+        self::assertCount(1, $adapter->replies);
+        self::assertSame('ref=ref_abc123', $adapter->replies[0]->getText());
+    }
+
+    public function testTheMatchedRouteIsAvailableOnTheContext(): void
+    {
+        $adapter = new FakePlatformAdapter();
+        $application = TestApp::create($adapter);
+        $route = null;
+        $argument = null;
+
+        $application->onTextPrefix('/hello', static function (Context $ctx) use (&$route, &$argument): void {
+            $route = $ctx->getRoute();
+            $argument = $ctx->getCommandArgument();
+            $ctx->reply(View::text('ok'));
+        });
+
+        $application->handle(TestApp::event('conv-1', '/hello there'));
+
+        self::assertInstanceOf(Route::class, $route);
+        self::assertSame(Route::TEXT_PREFIX, $route->getType());
+        self::assertSame('', $argument, 'Only command routes have an argument.');
+    }
 }
