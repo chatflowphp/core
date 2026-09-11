@@ -8,6 +8,7 @@ use ChatFlow\Storage\Drivers\DatabaseStorage;
 use ChatFlow\Storage\Drivers\FileStorage;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Storage\StorageInterface;
+use ChatFlow\Storage\VersionedStorageInterface;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -107,5 +108,37 @@ final class StorageDriversTest extends TestCase
         self::assertStringContainsString('CREATE TABLE IF NOT EXISTS `sessions`', DatabaseStorage::createTableSql('mysql', 'sessions'));
         self::assertStringContainsString('TIMESTAMP', DatabaseStorage::createTableSql('pgsql'));
         self::assertStringContainsString('chatflow_conversations', DatabaseStorage::createTableSql('sqlite'));
+    }
+
+    /**
+     * @param callable(): StorageInterface $factory
+     */
+    #[DataProvider('drivers')]
+    public function testVersionedWritesRejectStaleRecords(callable $factory): void
+    {
+        $storage = $factory();
+
+        self::assertInstanceOf(VersionedStorageInterface::class, $storage);
+
+        self::assertFalse(
+            $storage->saveIfVersion('c1', ['tickCount' => 1], 'tickCount', 7),
+            'A record that does not exist cannot have a version.',
+        );
+        self::assertTrue($storage->saveIfVersion('c1', ['tickCount' => 1], 'tickCount', null));
+        self::assertSame(['tickCount' => 1], $storage->get('c1'));
+
+        self::assertFalse(
+            $storage->saveIfVersion('c1', ['tickCount' => 3], 'tickCount', null),
+            'Creating over an existing record is refused.',
+        );
+
+        // Two workers read version 1; only the first one gets to write.
+        self::assertTrue($storage->saveIfVersion('c1', ['tickCount' => 2, 'by' => 'first'], 'tickCount', 1));
+        self::assertFalse($storage->saveIfVersion('c1', ['tickCount' => 2, 'by' => 'second'], 'tickCount', 1));
+        self::assertSame(['tickCount' => 2, 'by' => 'first'], $storage->get('c1'));
+
+        $storage->delete('c1');
+        self::assertTrue($storage->saveIfVersion('c1', ['tickCount' => 9], 'tickCount', null));
+        self::assertSame(['tickCount' => 9], $storage->get('c1'));
     }
 }

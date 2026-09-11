@@ -12,6 +12,7 @@ use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Contracts\RuntimeDependencyBinderInterface;
 use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\SystemEvent;
+use ChatFlow\Exception\ConversationConflictException;
 use ChatFlow\Exception\ErrorHandlerInterface;
 use ChatFlow\Exception\ExceptionRegistry;
 use ChatFlow\Exception\LogicException;
@@ -51,6 +52,11 @@ class Application implements FlowRuntimeInterface
      * @var list<MiddlewareInterface|class-string<MiddlewareInterface>>
      */
     private array $middlewares = [];
+
+    /**
+     * How many times a tick is replayed when another worker wrote the conversation first.
+     */
+    private const MAX_CONFLICT_ATTEMPTS = 3;
 
     private readonly Router $router;
 
@@ -95,18 +101,46 @@ class Application implements FlowRuntimeInterface
      */
     public function handle(InboundEventInterface $event, ?Route $route = null): Result
     {
-        $context = new Context($event, $this->adapter, $this->container, $this->runtimeObserver);
         $this->record('inbound.received', $event->getConversationId(), [
             'is_action' => $event->isAction(),
             'action_id' => $event->getActionId(),
             'text' => $event->getText(),
-            'system' => $context->isSystem(),
+            'system' => $event instanceof SystemEvent,
         ]);
 
-        try {
-            $result = $this->process($context, $route);
-        } catch (Throwable $exception) {
-            $result = $this->fail($context, $exception);
+        $attempt = 0;
+
+        while (true) {
+            // Every attempt starts from a clean context: nothing is delivered before the snapshot
+            // is stored, so a conflicting tick leaves no trace for the user.
+            $context = new Context($event, $this->adapter, $this->container, $this->runtimeObserver);
+
+            try {
+                $result = $this->process($context, $route);
+
+                break;
+            } catch (ConversationConflictException $exception) {
+                $attempt++;
+                $this->record('conversation.conflict', $event->getConversationId(), [
+                    'attempt' => $attempt,
+                    'message' => $exception->getMessage(),
+                ]);
+
+                if ($attempt >= self::MAX_CONFLICT_ATTEMPTS) {
+                    $this->logger->warning('Conversation is being changed by another worker', [
+                        'conversation_id' => $event->getConversationId(),
+                        'attempts' => $attempt,
+                    ]);
+
+                    $result = Result::error('conversation_conflict', ['attempts' => $attempt]);
+
+                    break;
+                }
+            } catch (Throwable $exception) {
+                $result = $this->fail($context, $exception);
+
+                break;
+            }
         }
 
         try {
