@@ -52,6 +52,9 @@ final class PhoneScene extends BaseScene
 }
 ```
 
+- Slow replies (a model, a report) are two ticks: `handle()` records the input and
+  `schedule()`s the work; the result comes back through `onSideEffect()`. See docs/long-turns.md.
+
 ## Testing
 
 `ApplicationTester` (needs phpunit) drives a flow: `send()`, `press()`, `travel()` for timers,

@@ -50,6 +50,11 @@ Effects are queued and delivered after the tick committed. A failed tick drops t
 `downloadAttachment($dir)` asks the adapter to download the first attachment and returns the
 local path, or `null`.
 
+## Tick Number
+
+`$ctx->getTickCount()` is the number this tick commits as; hand it to work outside the tick and
+pass it back to `Application::run()` as `expectedTick`. See [Long Turns](long-turns.md).
+
 ## Side Effects
 
 ```php

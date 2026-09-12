@@ -376,6 +376,16 @@ class Context
         return $this->conversation()->getCurrentScene();
     }
 
+    /**
+     * The number this tick commits as. Hand it to work that runs outside the tick and pass it back
+     * to Application::run() as `expectedTick`, so a result is applied only when nothing else
+     * changed the conversation meanwhile; see docs/long-turns.md.
+     */
+    public function getTickCount(): int
+    {
+        return $this->conversation()->getMachine()->getTickCount() + 1;
+    }
+
     public function inScene(): bool
     {
         return $this->conversation()->inScene();

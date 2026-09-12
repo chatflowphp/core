@@ -70,7 +70,15 @@ $application->leave($conversationId);
 ```
 
 `run()` handles a `SystemEvent` with a global custom route. Everything else is the same as for
-user events, so schedulers and admin tools act on conversations through one code path.
+user events, so schedulers and admin tools act on conversations through one code path. System
+ticks reach scenes that refuse global routes.
+
+```php
+$application->run($conversationId, $handler, 'answer', expectedTick: $tick);
+```
+
+With `expectedTick` the handler runs only when the conversation is still at that tick; otherwise
+the result is `conversation_moved` and nothing is retried. See [Long Turns](long-turns.md).
 
 ## Side Effects
 
@@ -102,6 +110,7 @@ flushed. The Telegram adapter uses it to answer callback queries nobody acknowle
 
 | Status | Message | When |
 | --- | --- | --- |
+| `error` | `conversation_moved` | `run()` with `expectedTick` found the conversation past that tick |
 | `success` | `route_processed` | a route ran in the root scene |
 | `success` | `global_route_processed` | a global route ran inside a scene |
 | `success` | `scene_processed` | the active scene consumed the event |

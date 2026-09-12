@@ -72,6 +72,8 @@ class Application implements FlowRuntimeInterface
      */
     private const MAX_CONFLICT_ATTEMPTS = 3;
 
+    private const EXPECTED_TICK = 'expected_tick';
+
     private readonly Router $router;
 
     private readonly ConversationManager $conversations;
@@ -231,12 +233,18 @@ class Application implements FlowRuntimeInterface
      *
      * Pass a `ConversationRef` instead of an id when the adapter needs platform facts to deliver
      * the messages, such as the chat a scoped conversation belongs to.
+     *
+     * `$expectedTick` guards work computed outside a tick: when the conversation has moved past
+     * that tick meanwhile, the handler does not run and the result is `conversation_moved`.
      */
-    public function run(string|ConversationRef $conversation, callable $handler, string $reason = 'system'): Result
+    public function run(string|ConversationRef $conversation, callable $handler, string $reason = 'system', ?int $expectedTick = null): Result
     {
-        $event = $conversation instanceof ConversationRef
-            ? new SystemEvent($conversation, reason: $reason)
-            : SystemEvent::forConversation($conversation, $reason);
+        $metadata = $expectedTick === null ? [] : [self::EXPECTED_TICK => $expectedTick];
+        $event = new SystemEvent(
+            $conversation instanceof ConversationRef ? $conversation : new ConversationRef($conversation),
+            reason: $reason,
+            metadata: $metadata,
+        );
 
         return $this->handle($event, Route::custom('system:' . $reason, $handler, global: true));
     }
@@ -513,6 +521,20 @@ class Application implements FlowRuntimeInterface
 
         $conversation = $this->conversations->resume($context->getConversationId());
         $context->attachConversation($conversation);
+
+        $expectedTick = $context->getEvent()->getMetadata()[self::EXPECTED_TICK] ?? null;
+
+        if (\is_int($expectedTick) && $conversation->getMachine()->getTickCount() !== $expectedTick) {
+            $this->record('conversation.moved', $context->getConversationId(), [
+                'expected_tick' => $expectedTick,
+                'tick' => $conversation->getMachine()->getTickCount(),
+            ]);
+
+            return Result::error('conversation_moved', [
+                'expected_tick' => $expectedTick,
+                'tick' => $conversation->getMachine()->getTickCount(),
+            ]);
+        }
 
         $pending = $conversation->takePendingTransition();
 
