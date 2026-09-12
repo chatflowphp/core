@@ -28,6 +28,8 @@ use ChatFlow\Routing\Route;
 use ChatFlow\Scene\Conversation;
 use ChatFlow\Scene\Interaction;
 use ChatFlow\Scene\SceneContext;
+use ChatFlow\SideEffect\SideEffect;
+use ChatFlow\Support\SerializableValueValidator;
 use ChatFlow\View\View;
 
 /**
@@ -208,6 +210,45 @@ class Context
     public function clearOutboundEffects(): void
     {
         $this->effects = [];
+    }
+
+    // -- side effects --------------------------------------------------------------------------
+
+    /**
+     * Schedules work to run after this tick is committed: a refund, a CRM write, a slow API call.
+     * The effect is stored with the snapshot, so a failed tick drops it and a crash keeps it; the
+     * handler registered under `$handler` runs it after persistence and may hand a result back to
+     * the scene through SideEffectListenerInterface.
+     *
+     * The id is the idempotency key handlers must respect; by default it is unique per
+     * conversation, tick and position. Scheduling an id that is already pending changes nothing.
+     *
+     * @param array<string, mixed> $payload Serializable data for the handler
+     *
+     * @throws SceneException When the context was created outside of Application::handle().
+     */
+    public function schedule(string $handler, array $payload = [], ?string $id = null): SideEffect
+    {
+        $conversation = $this->conversation();
+        $session = $conversation->getContext();
+        $id ??= \sprintf(
+            '%s:%d:%d',
+            $this->getConversationId(),
+            $conversation->getMachine()->getTickCount() + 1,
+            \count($session->getSideEffects()) + 1,
+        );
+
+        $effect = new SideEffect($id, $handler, SerializableValueValidator::normalizeMap($payload, 'payload'));
+
+        if (!$session->addSideEffect($effect)) {
+            $this->record('side_effect.duplicate', ['effect' => $id, 'handler' => $handler]);
+
+            return $effect;
+        }
+
+        $this->record('side_effect.scheduled', ['effect' => $id, 'handler' => $handler]);
+
+        return $effect;
     }
 
     public function downloadAttachment(string $destinationDir): ?string

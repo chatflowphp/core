@@ -25,7 +25,9 @@ For every inbound event, `Application::handle()`:
 7. runs the pipeline around one machine tick;
 8. persists the snapshot when the tick ran and the conversation has something worth storing;
 9. delivers the queued outbound effects through the adapter, in order;
-10. runs the adapter's `afterHandle()` hook, if it has one, and flushes the container's request
+10. runs the side effects the conversation has pending, each against a fresh snapshot, and hands
+    their results back as system ticks;
+11. runs the adapter's `afterHandle()` hook, if it has one, and flushes the container's request
     scope.
 
 If anything throws before step 9, the machine has already rolled back its state and context, the
@@ -47,7 +49,7 @@ per tick.
 ## Boundaries
 
 Core owns the event model, routing, middleware order, scene lifecycle, session mutation, the view
-model, the effect queue, capability enforcement and runtime events.
+model, the effect queue, side effects, capability enforcement and runtime events.
 
 Adapters own platform input parsing, delivery to remote APIs, file downloads, capability
 declaration, platform-specific helpers and error mapping around vendor SDKs.
@@ -65,6 +67,7 @@ platform update
   -> Context reply/render/ack  (queued)
   -> persist snapshot
   -> adapter deliver()
+  -> side effect handlers  (stored with the snapshot, executed after it)
 ```
 
 ## Runtime Dependency Binding

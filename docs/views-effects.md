@@ -40,6 +40,10 @@ Handlers never send messages directly. They queue effects on the context:
 Effects are delivered in order after the tick committed. If the tick fails they are dropped.
 If delivery fails, the remaining effects are skipped and the result is `delivery_failed`.
 
+Outbound effects are messages and live in memory until delivered. Work in other systems, such as
+a refund or a CRM write, is a [side effect](side-effects.md): stored with the snapshot, executed
+after delivery, retried after a crash.
+
 ## Capabilities
 
 `PlatformCapabilities` declares what an adapter supports: actions, choices, media, screen render,

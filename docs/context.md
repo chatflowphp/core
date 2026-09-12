@@ -50,6 +50,14 @@ Effects are queued and delivered after the tick committed. A failed tick drops t
 `downloadAttachment($dir)` asks the adapter to download the first attachment and returns the
 local path, or `null`.
 
+## Side Effects
+
+```php
+$ctx->schedule('refund', ['order' => 42]);
+```
+
+Records work to run after the tick committed; see [Side Effects](side-effects.md).
+
 ## Session
 
 ```php

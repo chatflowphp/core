@@ -55,7 +55,8 @@ when no scene is active; mark it `global` to run it inside scenes as well.
 
 Order of work: bind request dependencies, resume the conversation, apply a pending transition
 (its own transaction), match the route, run middleware around one tick, persist, deliver effects,
-run the adapter hook, flush the container scope. See [Architecture](architecture.md).
+run the scheduled side effects, run the adapter hook, flush the container scope. See
+[Architecture](architecture.md).
 
 ## System Ticks
 
@@ -67,6 +68,17 @@ $application->leave($conversationId);
 
 `run()` handles a `SystemEvent` with a global custom route. Everything else is the same as for
 user events, so schedulers and admin tools act on conversations through one code path.
+
+## Side Effects
+
+```php
+$application->registerSideEffect('refund', RefundHandler::class);
+$application->onSideEffect('refund', $listener);
+$executed = $application->drain($conversationId);
+```
+
+Work scheduled inside a tick with `$ctx->schedule()` runs after the snapshot is committed; see
+[Side Effects](side-effects.md).
 
 ## Adapter Hook
 

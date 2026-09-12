@@ -8,14 +8,15 @@ use Automata\Context\ArrayContext;
 use ChatFlow\Core\Context;
 use ChatFlow\Exception\LogicException;
 use ChatFlow\Exception\SceneException;
+use ChatFlow\SideEffect\SideEffect;
 
 /**
  * Conversation state shared by every scene: the automata context behind the conversation's
  * state machine. Everything stored here is part of the persisted snapshot and is rolled back
  * together with the current scene when a tick fails.
  *
- * Keys starting with "_" are reserved for the runtime. Scene history, the pending interaction and
- * adapter extensions live there; they are hidden from all() and keys() and cannot be written
+ * Keys starting with "_" are reserved for the runtime. Scene history, the pending interaction,
+ * scheduled side effects and adapter extensions live there; they are hidden from all() and keys() and cannot be written
  * through set().
  *
  * @phpstan-import-type InteractionConfig from Interaction
@@ -29,6 +30,8 @@ class SceneContext extends ArrayContext
     private const HISTORY_KEY = '_history';
     private const INTERACTION_KEY = '_interaction';
     private const PENDING_KEY = '_pending';
+    private const EFFECTS_KEY = '_effects';
+    private const FAILED_EFFECTS_KEY = '_effects_failed';
     private const EXTENSION_PREFIX = '_ext.';
 
     private ?Context $request = null;
@@ -261,6 +264,117 @@ class SceneContext extends ArrayContext
     public function clearPendingTransition(): void
     {
         parent::remove(self::PENDING_KEY);
+    }
+
+    // -- side effects --------------------------------------------------------------------------
+
+    /**
+     * Effects scheduled with Context::schedule() and not executed yet, in scheduling order.
+     *
+     * @return list<SideEffect>
+     */
+    public function getSideEffects(): array
+    {
+        return $this->readEffects(self::EFFECTS_KEY);
+    }
+
+    /**
+     * @return bool False when an effect with the same id is already pending; nothing is changed then.
+     */
+    public function addSideEffect(SideEffect $effect): bool
+    {
+        $effects = $this->getSideEffects();
+
+        foreach ($effects as $pending) {
+            if ($pending->id === $effect->id) {
+                return false;
+            }
+        }
+
+        $effects[] = $effect;
+        $this->writeEffects(self::EFFECTS_KEY, $effects);
+
+        return true;
+    }
+
+    public function replaceSideEffect(SideEffect $effect): void
+    {
+        $effects = [];
+
+        foreach ($this->getSideEffects() as $pending) {
+            $effects[] = $pending->id === $effect->id ? $effect : $pending;
+        }
+
+        $this->writeEffects(self::EFFECTS_KEY, $effects);
+    }
+
+    public function removeSideEffect(string $id): void
+    {
+        $effects = [];
+
+        foreach ($this->getSideEffects() as $pending) {
+            if ($pending->id !== $id) {
+                $effects[] = $pending;
+            }
+        }
+
+        $this->writeEffects(self::EFFECTS_KEY, $effects);
+    }
+
+    /**
+     * Effects the runtime gave up on: unknown handler, or too many failed attempts. Kept for the
+     * application to inspect and clear.
+     *
+     * @return list<SideEffect>
+     */
+    public function getFailedSideEffects(): array
+    {
+        return $this->readEffects(self::FAILED_EFFECTS_KEY);
+    }
+
+    public function addFailedSideEffect(SideEffect $effect): void
+    {
+        $failed = $this->getFailedSideEffects();
+        $failed[] = $effect;
+        $this->writeEffects(self::FAILED_EFFECTS_KEY, $failed);
+    }
+
+    public function clearFailedSideEffects(): void
+    {
+        parent::remove(self::FAILED_EFFECTS_KEY);
+    }
+
+    /**
+     * @return list<SideEffect>
+     */
+    private function readEffects(string $key): array
+    {
+        $raw = $this->get($key);
+        $effects = [];
+
+        foreach (\is_array($raw) ? $raw : [] as $item) {
+            $effect = \is_array($item) ? SideEffect::fromArray($item) : null;
+
+            if ($effect !== null) {
+                $effects[] = $effect;
+            }
+        }
+
+        return $effects;
+    }
+
+    /**
+     * @param list<SideEffect> $effects
+     */
+    private function writeEffects(string $key, array $effects): void
+    {
+        if ($effects === []) {
+            parent::remove($key);
+
+            return;
+        }
+
+        parent::set($key, array_map(static fn(SideEffect $effect): array => $effect->toArray(), $effects));
     }
 
     // -- adapter extensions --------------------------------------------------------------------

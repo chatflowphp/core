@@ -58,6 +58,10 @@ final class PhoneScene extends BaseScene
 - Declare transitions when the spec has a screen map: `$runtime->allowTransition($from, $to, $guard)`.
 - Use `View`, `Action`, `Choice`, `MediaAttachment` for output; `reply()` for new messages,
   `render()` for screen updates, `ack()` for button feedback.
+- Work outside the conversation (refund, CRM, email) is `$ctx->schedule('name', $payload)` with a
+  handler registered by `$runtime->registerSideEffect('name', Handler::class)`; it runs after the
+  tick committed, survives crashes, and must be idempotent by `SideEffect::$id`.
+- Growing data (message history, journals) goes to `StreamStorageInterface`, not the session.
 - Session values and payloads: scalars, null, arrays, backed enums only.
 - Interaction handlers are method names, never closures.
 - A handler can run twice for one event (rollback, or a replay after a concurrent write): keep

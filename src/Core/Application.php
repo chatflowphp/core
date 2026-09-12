@@ -31,7 +31,13 @@ use ChatFlow\Scene\RootScene;
 use ChatFlow\Scene\SceneContext;
 use ChatFlow\Scene\SceneRegistry;
 use ChatFlow\Scene\SceneTransitions;
+use ChatFlow\SideEffect\SideEffect;
+use ChatFlow\SideEffect\SideEffectHandlerInterface;
+use ChatFlow\SideEffect\SideEffectListenerInterface;
+use ChatFlow\SideEffect\SideEffectRegistry;
+use ChatFlow\SideEffect\SideEffectRunner;
 use ChatFlow\Validation\ValidationRegistry;
+use Closure;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -41,8 +47,9 @@ use Throwable;
  *
  * Order of work for every event: bind request dependencies, resume the conversation, apply a
  * transition scheduled from outside (its own transaction), match a route, run middleware around
- * the tick, persist the conversation, deliver queued effects. When the tick fails the
- * conversation is rolled back, queued effects are dropped and only the error handler replies.
+ * the tick, persist the conversation, deliver queued effects, run the side effects the tick
+ * scheduled. When the tick fails the conversation is rolled back, queued effects are dropped,
+ * scheduled side effects vanish with the rolled-back snapshot and only the error handler replies.
  *
  * @phpstan-import-type PendingTransition from SceneContext
  */
@@ -70,6 +77,23 @@ class Application implements FlowRuntimeInterface
 
     private readonly RuntimeObserverInterface $runtimeObserver;
 
+    private readonly SideEffectRegistry $sideEffects;
+
+    private readonly SideEffectRunner $sideEffectRunner;
+
+    /**
+     * @var array<string, callable>
+     */
+    private array $sideEffectListeners = [];
+
+    /**
+     * Conversations whose side effects are being drained right now, so a follow-up tick does not
+     * start a nested drain.
+     *
+     * @var array<string, true>
+     */
+    private array $draining = [];
+
     public function __construct(
         private readonly PlatformAdapterInterface $adapter,
         private readonly ContainerInterface $container,
@@ -79,6 +103,8 @@ class Application implements FlowRuntimeInterface
         ?ValidationRegistry $validationRegistry = null,
         ?LoggerInterface $logger = null,
         ?RuntimeObserverInterface $runtimeObserver = null,
+        ?SideEffectRegistry $sideEffects = null,
+        int $sideEffectMaxAttempts = 5,
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->runtimeObserver = $runtimeObserver ?? new NullRuntimeObserver();
@@ -91,7 +117,18 @@ class Application implements FlowRuntimeInterface
             observer: $this->runtimeObserver,
         );
 
+        $this->sideEffects = $sideEffects ?? new SideEffectRegistry($container);
+        $this->sideEffectRunner = new SideEffectRunner(
+            $this->conversations,
+            $this->sideEffects,
+            $this->logger,
+            $this->runtimeObserver,
+            $sideEffectMaxAttempts,
+        );
+
         $this->container->set(ValidationRegistry::class, $this->validationRegistry);
+        $this->container->set(SideEffectRegistry::class, $this->sideEffects);
+        $this->container->set(FlowRuntimeInterface::class, $this);
         $this->container->set(SceneRegistry::class, $this->conversations->getScenes());
         $this->container->set(ConversationManager::class, $this->conversations);
     }
@@ -144,6 +181,8 @@ class Application implements FlowRuntimeInterface
         }
 
         try {
+            $this->drainAfterHandle($event->getConversationId());
+
             if ($this->adapter instanceof AfterHandleInterface) {
                 $this->adapter->afterHandle($context, $result);
             }
@@ -198,6 +237,64 @@ class Application implements FlowRuntimeInterface
         return $this->run($conversation, static function (Context $ctx): void {
             $ctx->leave();
         }, 'leave');
+    }
+
+    // -- side effects --------------------------------------------------------------------------
+
+    /**
+     * Registers the handler that executes effects scheduled as `$name` with Context::schedule().
+     *
+     * @param SideEffectHandlerInterface|class-string<SideEffectHandlerInterface>|Closure(SideEffect): (array<string, mixed>|null) $handler
+     */
+    public function registerSideEffect(string $name, SideEffectHandlerInterface|string|Closure $handler): static
+    {
+        $this->sideEffects->register($name, $handler);
+
+        return $this;
+    }
+
+    /**
+     * Receives the result a handler returned when the conversation is not in a scene that
+     * implements SideEffectListenerInterface. Called inside a system tick with the context, the
+     * effect and the result, so it can reply or navigate.
+     *
+     * @param callable(Context, SideEffect, array<string, mixed>): void $listener
+     */
+    public function onSideEffect(string $name, callable $listener): static
+    {
+        $this->sideEffectListeners[$name] = $listener;
+
+        return $this;
+    }
+
+    /**
+     * Executes the pending side effects of a conversation now. The runtime does this after every
+     * handled event; call it from a worker to finish what a crashed request left behind.
+     *
+     * @return int How many effects were executed successfully
+     */
+    public function drain(string|ConversationRef $conversation): int
+    {
+        $conversationId = $conversation instanceof ConversationRef ? $conversation->getId() : $conversation;
+
+        if (isset($this->draining[$conversationId])) {
+            return 0;
+        }
+
+        $this->draining[$conversationId] = true;
+
+        try {
+            return $this->sideEffectRunner->drain($conversationId, function (SideEffect $effect, array $result) use ($conversation): void {
+                $this->deliverSideEffectResult($conversation, $effect, $result);
+            });
+        } finally {
+            unset($this->draining[$conversationId]);
+        }
+    }
+
+    public function getSideEffects(): SideEffectRegistry
+    {
+        return $this->sideEffects;
     }
 
     // -- FlowRuntimeInterface ------------------------------------------------------------------
@@ -502,6 +599,67 @@ class Application implements FlowRuntimeInterface
         }
 
         return $stack;
+    }
+
+    private function drainAfterHandle(string $conversationId): void
+    {
+        if (isset($this->draining[$conversationId])) {
+            return;
+        }
+
+        try {
+            $this->drain($conversationId);
+        } catch (Throwable $exception) {
+            $this->logger->error('Draining side effects failed', [
+                'conversation_id' => $conversationId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Hands a handler's result back to the conversation as one system tick: the active scene's
+     * SideEffectListenerInterface hook, else the application listener for the handler name.
+     *
+     * @param array<string, mixed> $result
+     */
+    private function deliverSideEffectResult(string|ConversationRef $conversation, SideEffect $effect, array $result): void
+    {
+        $this->run($conversation, function (Context $ctx) use ($effect, $result): void {
+            $sceneId = $ctx->getCurrentScene();
+
+            if ($sceneId !== RootScene::ID) {
+                $scene = $this->conversations->getScenes()->get($sceneId);
+
+                if ($scene instanceof SideEffectListenerInterface) {
+                    $scene->onSideEffect($ctx, $effect, $result);
+
+                    return;
+                }
+            }
+
+            $listener = $this->sideEffectListeners[$effect->handler] ?? null;
+
+            if ($listener !== null) {
+                $this->container->call($listener, [
+                    Context::class => $ctx,
+                    SideEffect::class => $effect,
+                    'ctx' => $ctx,
+                    'context' => $ctx,
+                    'effect' => $effect,
+                    'result' => $result,
+                ]);
+
+                return;
+            }
+
+            $this->record('side_effect.result_dropped', $ctx->getConversationId(), [
+                'effect' => $effect->id,
+                'handler' => $effect->handler,
+                'scene' => $sceneId,
+            ]);
+        }, 'effect:' . $effect->handler);
     }
 
     private function bindRuntimeDependencies(Context $context): void

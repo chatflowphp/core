@@ -9,6 +9,7 @@ adapters. It is responsible for:
 - conversation storage, snapshots and append-only streams;
 - validation;
 - platform-neutral views and outbound effects;
+- side effects that run after the tick committed;
 - runtime observability;
 - serialization rules.
 
@@ -24,16 +25,17 @@ or platform-specific rendering. Those belong to adapters.
 5. [Scenes](scenes.md)
 6. [Transitions](transitions.md)
 7. [Views And Effects](views-effects.md)
-8. [Storage](storage.md)
-9. [Streams](streams.md)
-10. [Validation](validation.md)
-11. [Localization](i18n.md)
-12. [Middleware](middleware.md)
-13. [Observability](observability.md)
-14. [Serialization](serialization.md)
-15. [Testing](testing.md)
-16. [Upgrade From 1.x](upgrade-from-1.x.md)
-17. [AI Index](ai-index.md)
+8. [Side Effects](side-effects.md)
+9. [Storage](storage.md)
+10. [Streams](streams.md)
+11. [Validation](validation.md)
+12. [Localization](i18n.md)
+13. [Middleware](middleware.md)
+14. [Observability](observability.md)
+15. [Serialization](serialization.md)
+16. [Testing](testing.md)
+17. [Upgrade From 1.x](upgrade-from-1.x.md)
+18. [AI Index](ai-index.md)
 
 ## Using This Through An Adapter?
 
@@ -55,6 +57,7 @@ adapter authors.
 - `ChatFlow\View\View`, `Action`, `Choice`, `MediaAttachment`
 - `ChatFlow\I18n\TranslatorInterface`, `ArrayTranslator`, `LocaleResolverInterface`
 - `ChatFlow\Outbound\ReplyEffect`, `RenderEffect`, `AckEffect`
+- `ChatFlow\SideEffect\SideEffect`, `SideEffectHandlerInterface`, `SideEffectListenerInterface`
 - `ChatFlow\Platform\PlatformCapabilities`
 
 ## Design Rules
