@@ -79,6 +79,11 @@ root scene. A `conversation.reset` runtime event is recorded in the latter case.
 `ConversationManager` accepts `sessionTtlSeconds`. Expired snapshots (by `createdAt`, which is
 the time of the last write) are deleted on load.
 
+## Streams
+
+Data that only grows, such as the message history, does not belong in the snapshot. Use
+`StreamStorageInterface`, see [Streams](streams.md).
+
 ## Other Records
 
 Storage is a generic key-value store: `RateLimitMiddleware` keeps its counters under

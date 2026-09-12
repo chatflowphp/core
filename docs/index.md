@@ -6,7 +6,7 @@ adapters. It is responsible for:
 - normalized inbound events;
 - routing and middleware;
 - scenes as states of a per-conversation state machine;
-- conversation storage and snapshots;
+- conversation storage, snapshots and append-only streams;
 - validation;
 - platform-neutral views and outbound effects;
 - runtime observability;
@@ -25,14 +25,15 @@ or platform-specific rendering. Those belong to adapters.
 6. [Transitions](transitions.md)
 7. [Views And Effects](views-effects.md)
 8. [Storage](storage.md)
-9. [Validation](validation.md)
-10. [Localization](i18n.md)
-11. [Middleware](middleware.md)
-12. [Observability](observability.md)
-13. [Serialization](serialization.md)
-14. [Testing](testing.md)
-15. [Upgrade From 1.x](upgrade-from-1.x.md)
-16. [AI Index](ai-index.md)
+9. [Streams](streams.md)
+10. [Validation](validation.md)
+11. [Localization](i18n.md)
+12. [Middleware](middleware.md)
+13. [Observability](observability.md)
+14. [Serialization](serialization.md)
+15. [Testing](testing.md)
+16. [Upgrade From 1.x](upgrade-from-1.x.md)
+17. [AI Index](ai-index.md)
 
 ## Using This Through An Adapter?
 
@@ -50,7 +51,7 @@ adapter authors.
 - `ChatFlow\Routing\Router`, `Route`
 - `ChatFlow\Scene\BaseScene`, `RootScene`, `SceneContext`, `SceneTransitions`
 - `ChatFlow\Scene\ConversationManager`, `Conversation`
-- `ChatFlow\Storage\StorageInterface` and the drivers in `ChatFlow\Storage\Drivers`
+- `ChatFlow\Storage\StorageInterface`, `StreamStorageInterface` and the drivers in `ChatFlow\Storage\Drivers`
 - `ChatFlow\View\View`, `Action`, `Choice`, `MediaAttachment`
 - `ChatFlow\I18n\TranslatorInterface`, `ArrayTranslator`, `LocaleResolverInterface`
 - `ChatFlow\Outbound\ReplyEffect`, `RenderEffect`, `AckEffect`
