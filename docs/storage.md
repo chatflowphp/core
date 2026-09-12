@@ -20,6 +20,33 @@ Telegram uses the chat id.
 All drivers implement `StorageInterface` (`get`, `save`, `delete`, `exists`) and store records
 exactly as given.
 
+## Concurrent Writes
+
+Two workers can handle the same conversation at once: the user taps a button twice, or a scheduler
+acts while a message arrives. Both read the same snapshot, both tick, and a plain write would let
+the slower one overwrite the faster one.
+
+Drivers implement `VersionedStorageInterface` for that. The write goes through only when the
+stored record still carries the version that was read, which is the snapshot's `tickCount`.
+
+| Driver | What keeps the check and the write together |
+| --- | --- |
+| `MemoryStorage` | a single process |
+| `FileStorage` | the exclusive per-key lock |
+| `DatabaseStorage` | a transaction with `SELECT ... FOR UPDATE`, `BEGIN IMMEDIATE` on SQLite |
+| `RedisStorage` | a Lua script |
+
+When the record moved on, `ConversationStore` throws `ConversationConflictException`; the runtime
+replays the tick on top of the state that won, up to three times, and reports
+`conversation_conflict` after that. Nothing is delivered before the snapshot is stored, so the
+discarded attempt never reaches the user.
+
+A custom driver that implements only `StorageInterface` keeps working: the conflict is then found
+by reading before the write, which catches the ordinary case but cannot rule out a lost update.
+
+**A handler can therefore run more than once for one event.** Keep side effects outside the
+conversation idempotent, or key them on something you control, such as an order id.
+
 ## Database Schema
 
 ```php

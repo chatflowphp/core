@@ -11,6 +11,10 @@ All notable changes to this project are documented in this file. The format foll
 - `Context::getRoute()` and `Context::getCommandArgument()`, plus `Route::commandArgument()`:
   handlers read the argument of the matched command, which is what deep links carry
   ("/start ref_abc123").
+- Optimistic locking of conversation snapshots: `VersionedStorageInterface` with a
+  compare-and-swap write in all four drivers, `ConversationConflictException` when the stored
+  snapshot moved on, and up to three replays of the losing tick before the runtime answers
+  `conversation_conflict`. See `docs/storage.md`.
 - `Application::run()`, `enter()` and `leave()` accept a `ConversationRef` as well as an id, so an
   adapter can carry platform facts (the chat behind a scoped conversation) into a system tick.
 - `ChatFlow\I18n`: `TranslatorInterface` with `ArrayTranslator` and `SymfonyTranslatorAdapter`,

@@ -85,6 +85,7 @@ flushed. The Telegram adapter uses it to answer callback queries nobody acknowle
 | `no_match` | `null` | no scene is active and no route matched |
 | `error` | exception message | a handler, scene or middleware threw |
 | `error` | `delivery_failed` | the adapter could not deliver an effect |
+| `error` | `conversation_conflict` | another worker kept winning the race for this conversation |
 | any | middleware value | a middleware returned its own `Result` without calling `$next` |
 
 ## Errors
@@ -116,3 +117,7 @@ The snapshot is written after a successful tick, except for conversations that n
 root scene and stored nothing: unknown chats sending random text do not fill the storage.
 
 Nothing is written when a tick fails or when middleware short-circuits.
+
+The write is guarded: the snapshot is stored only when the conversation has not changed since this
+event read it. A tick that lost the race is replayed on top of the winner, which means a handler
+can run more than once for one event. See [Storage](storage.md).

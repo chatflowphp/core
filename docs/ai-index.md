@@ -60,6 +60,8 @@ final class PhoneScene extends BaseScene
   `render()` for screen updates, `ack()` for button feedback.
 - Session values and payloads: scalars, null, arrays, backed enums only.
 - Interaction handlers are method names, never closures.
+- A handler can run twice for one event (rollback, or a replay after a concurrent write): keep
+  side effects outside the conversation idempotent.
 - Deep links and command arguments: `$ctx->getCommandArgument()`.
 - Localization: register `ChatFlow\I18n\TranslatorInterface` in the container, add
   `LocaleMiddleware`, translate with `$ctx->t('id', ['name' => $value])`.
