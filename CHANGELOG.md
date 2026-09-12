@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-12
+
+A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are
+states, every inbound event is one tick. There is no backward compatibility with 1.x; see
+`docs/upgrade-from-1.x.md`.
+
 ### Added
 
 - Append-only streams: `StreamStorageInterface` with `MemoryStreamStorage`, `FileStreamStorage`,
@@ -26,20 +32,6 @@ All notable changes to this project are documented in this file. The format foll
   `conversation_moved` instead of applying a stale result. See `docs/long-turns.md`.
 - `Application` registers itself as `FlowRuntimeInterface` and the clock as `ClockInterface` in
   the container; `ClockInterface $clock` is a constructor argument.
-
-### Fixed
-
-- `Application::run()` reaches scenes that return `false` from `allowsGlobalRoutes()`: system
-  ticks always run their handler instead of being fed to the scene as empty input.
-
-## [2.0.0-rc1] - 2026-09-12
-
-A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are
-states, every inbound event is one tick. There is no backward compatibility with 1.x; see
-`docs/upgrade-from-1.x.md`.
-
-### Added
-
 - `Context::getRoute()` and `Context::getCommandArgument()`, plus `Route::commandArgument()`:
   handlers read the argument of the matched command, which is what deep links carry
   ("/start ref_abc123").
@@ -104,6 +96,11 @@ states, every inbound event is one tick. There is no backward compatibility with
 - `Interaction::__destruct()` warning, `DependencyException`, `ConfigException`,
   `InvalidInteractionException`, `StopExecutionException`, `FSMException`.
 - `Context::getStateManager()`, `setStateManager()`, `setSession()`, `getSession()`.
+
+### Fixed
+
+- `Application::run()` reaches scenes that return `false` from `allowsGlobalRoutes()`: system
+  ticks always run their handler instead of being fed to the scene as empty input.
 
 ## [1.0.2] - 2026-08-30
 
