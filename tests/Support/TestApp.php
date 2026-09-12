@@ -16,6 +16,7 @@ use ChatFlow\Scene\SceneRegistry;
 use ChatFlow\Scene\SceneTransitions;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Storage\StorageInterface;
+use ChatFlow\Timer\TimerStoreInterface;
 use ChatFlow\Validation\ValidationRegistry;
 use Psr\Clock\ClockInterface;
 
@@ -31,6 +32,7 @@ final class TestApp
         ?Container $container = null,
         ?ClockInterface $clock = null,
         ?int $sessionTtlSeconds = null,
+        ?TimerStoreInterface $timers = null,
     ): Application {
         $container ??= new Container();
         $scenes = new SceneRegistry($container);
@@ -51,6 +53,8 @@ final class TestApp
             conversations: $conversations,
             validationRegistry: $validation,
             runtimeObserver: $observer,
+            timers: $timers,
+            clock: $clock,
         );
     }
 

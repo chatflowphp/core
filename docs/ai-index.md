@@ -62,6 +62,8 @@ final class PhoneScene extends BaseScene
   handler registered by `$runtime->registerSideEffect('name', Handler::class)`; it runs after the
   tick committed, survives crashes, and must be idempotent by `SideEffect::$id`.
 - Growing data (message history, journals) goes to `StreamStorageInterface`, not the session.
+- Later action is `$ctx->wakeAt($when, 'reason')` plus `onTimer()` on the scene or the runtime; a
+  scheduler calls `$runtime->runDue()`. `$ctx->getOccurredAt()` is the platform time of the event.
 - Session values and payloads: scalars, null, arrays, backed enums only.
 - Interaction handlers are method names, never closures.
 - A handler can run twice for one event (rollback, or a replay after a concurrent write): keep

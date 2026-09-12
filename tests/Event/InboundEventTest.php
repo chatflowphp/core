@@ -8,6 +8,7 @@ use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Event\InboundEvent;
 use ChatFlow\Event\MessageRef;
+use ChatFlow\Event\SystemEvent;
 use ChatFlow\Event\UserRef;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -37,6 +38,18 @@ final class InboundEventTest extends TestCase
         self::assertSame(10, $event->getMessageRef()?->get('message_id'));
         self::assertSame(10, $event->getAttachments()[0]->get('width'));
         self::assertNull($event->getAttachments()[0]->get('height'));
+        self::assertLessThanOrEqual(2, abs(time() - $event->getOccurredAt()->getTimestamp()), 'Without a platform time the event carries the time it was created.');
+    }
+
+    public function testThePlatformTimeIsKept(): void
+    {
+        $at = new \DateTimeImmutable('2026-09-12 10:00:00+03:00');
+        $event = new InboundEvent(new ConversationRef('42'), text: 'hi', occurredAt: $at);
+        $system = new SystemEvent(new ConversationRef('42'), reason: 'cron', occurredAt: $at);
+
+        self::assertSame($at, $event->getOccurredAt());
+        self::assertSame($at, $system->getOccurredAt());
+        self::assertSame(['system' => true, 'reason' => 'cron'], $system->getMetadata());
     }
 
     public function testEmptyActionIdIsNotAnAction(): void

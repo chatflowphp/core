@@ -58,6 +58,16 @@ $ctx->schedule('refund', ['order' => 42]);
 
 Records work to run after the tick committed; see [Side Effects](side-effects.md).
 
+## Timers
+
+```php
+$ctx->wakeAt(86400, 'silence');
+$ctx->cancelTimer('silence');
+$ctx->getOccurredAt();   // when the event happened on the platform
+```
+
+See [Timers](timers.md).
+
 ## Session
 
 ```php

@@ -8,6 +8,7 @@ use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Event\MessageRef;
 use ChatFlow\Event\UserRef;
+use DateTimeImmutable;
 
 interface InboundEventInterface
 {
@@ -38,4 +39,10 @@ interface InboundEventInterface
      * @return array<string, mixed>
      */
     public function getMetadata(): array;
+
+    /**
+     * When the event happened on the platform, not when it was processed. Adapters take it from
+     * the platform payload; system events carry the time they were created.
+     */
+    public function getOccurredAt(): DateTimeImmutable;
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ChatFlow\Core;
 
+use Automata\Clock\SystemClock;
 use ChatFlow\Container\ContainerInterface;
 use ChatFlow\Contracts\AfterHandleInterface;
 use ChatFlow\Contracts\FlowRuntimeInterface;
@@ -36,8 +37,14 @@ use ChatFlow\SideEffect\SideEffectHandlerInterface;
 use ChatFlow\SideEffect\SideEffectListenerInterface;
 use ChatFlow\SideEffect\SideEffectRegistry;
 use ChatFlow\SideEffect\SideEffectRunner;
+use ChatFlow\Timer\Timer;
+use ChatFlow\Timer\TimerListenerInterface;
+use ChatFlow\Timer\TimerSideEffectHandler;
+use ChatFlow\Timer\TimerStoreInterface;
 use ChatFlow\Validation\ValidationRegistry;
 use Closure;
+use DateTimeImmutable;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Throwable;
@@ -87,6 +94,13 @@ class Application implements FlowRuntimeInterface
     private array $sideEffectListeners = [];
 
     /**
+     * @var array<string, callable>
+     */
+    private array $timerListeners = [];
+
+    private readonly ClockInterface $clock;
+
+    /**
      * Conversations whose side effects are being drained right now, so a follow-up tick does not
      * start a nested drain.
      *
@@ -105,8 +119,11 @@ class Application implements FlowRuntimeInterface
         ?RuntimeObserverInterface $runtimeObserver = null,
         ?SideEffectRegistry $sideEffects = null,
         int $sideEffectMaxAttempts = 5,
+        private readonly ?TimerStoreInterface $timers = null,
+        ?ClockInterface $clock = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
+        $this->clock = $clock ?? new SystemClock();
         $this->runtimeObserver = $runtimeObserver ?? new NullRuntimeObserver();
         $this->router = $router ?? new Router();
         $this->validationRegistry = $validationRegistry ?? new ValidationRegistry($container);
@@ -129,6 +146,14 @@ class Application implements FlowRuntimeInterface
         $this->container->set(ValidationRegistry::class, $this->validationRegistry);
         $this->container->set(SideEffectRegistry::class, $this->sideEffects);
         $this->container->set(FlowRuntimeInterface::class, $this);
+        $this->container->set(ClockInterface::class, $this->clock);
+
+        if ($this->timers !== null) {
+            $this->container->set(TimerStoreInterface::class, $this->timers);
+            $handler = new TimerSideEffectHandler($this->timers);
+            $this->sideEffects->register(TimerSideEffectHandler::SCHEDULE, $handler);
+            $this->sideEffects->register(TimerSideEffectHandler::CANCEL, $handler);
+        }
         $this->container->set(SceneRegistry::class, $this->conversations->getScenes());
         $this->container->set(ConversationManager::class, $this->conversations);
     }
@@ -295,6 +320,61 @@ class Application implements FlowRuntimeInterface
     public function getSideEffects(): SideEffectRegistry
     {
         return $this->sideEffects;
+    }
+
+    // -- timers --------------------------------------------------------------------------------
+
+    /**
+     * Receives due timers with the given reason when the conversation is not in a scene that
+     * implements TimerListenerInterface. Called inside a system tick with the context and the timer.
+     *
+     * @param callable(Context, Timer): void $listener
+     */
+    public function onTimer(string $reason, callable $listener): static
+    {
+        $this->timerListeners[$reason] = $listener;
+
+        return $this;
+    }
+
+    /**
+     * Wakes every conversation whose timer is due: one system tick per timer, delivered to the
+     * active scene's TimerListenerInterface hook or the onTimer() listener for its reason, then
+     * the timer is cancelled. Call it from a scheduler as often as the shortest timer you use.
+     *
+     * A crash between the tick and the cancellation runs the timer again on the next call, so
+     * listeners should tolerate a repeated wake-up.
+     *
+     * @return int How many timers were run
+     */
+    public function runDue(?DateTimeImmutable $now = null, int $limit = 100): int
+    {
+        if ($this->timers === null) {
+            return 0;
+        }
+
+        $ran = 0;
+
+        foreach ($this->timers->due($now ?? $this->clock->now(), $limit) as $timer) {
+            $result = $this->run($timer->conversationId, function (Context $ctx) use ($timer): void {
+                $this->deliverTimer($ctx, $timer);
+            }, 'timer:' . $timer->reason);
+
+            $this->record('timer.ran', $timer->conversationId, [
+                'timer' => $timer->id,
+                'reason' => $timer->reason,
+                'status' => $result->getStatus(),
+            ]);
+            $this->timers->cancel($timer->id);
+            $ran++;
+        }
+
+        return $ran;
+    }
+
+    public function getTimers(): ?TimerStoreInterface
+    {
+        return $this->timers;
     }
 
     // -- FlowRuntimeInterface ------------------------------------------------------------------
@@ -660,6 +740,41 @@ class Application implements FlowRuntimeInterface
                 'scene' => $sceneId,
             ]);
         }, 'effect:' . $effect->handler);
+    }
+
+    private function deliverTimer(Context $ctx, Timer $timer): void
+    {
+        $sceneId = $ctx->getCurrentScene();
+
+        if ($sceneId !== RootScene::ID) {
+            $scene = $this->conversations->getScenes()->get($sceneId);
+
+            if ($scene instanceof TimerListenerInterface) {
+                $scene->onTimer($ctx, $timer);
+
+                return;
+            }
+        }
+
+        $listener = $this->timerListeners[$timer->reason] ?? null;
+
+        if ($listener !== null) {
+            $this->container->call($listener, [
+                Context::class => $ctx,
+                Timer::class => $timer,
+                'ctx' => $ctx,
+                'context' => $ctx,
+                'timer' => $timer,
+            ]);
+
+            return;
+        }
+
+        $this->record('timer.dropped', $ctx->getConversationId(), [
+            'timer' => $timer->id,
+            'reason' => $timer->reason,
+            'scene' => $sceneId,
+        ]);
     }
 
     private function bindRuntimeDependencies(Context $context): void

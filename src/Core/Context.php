@@ -30,7 +30,13 @@ use ChatFlow\Scene\Interaction;
 use ChatFlow\Scene\SceneContext;
 use ChatFlow\SideEffect\SideEffect;
 use ChatFlow\Support\SerializableValueValidator;
+use ChatFlow\Timer\Timer;
+use ChatFlow\Timer\TimerSideEffectHandler;
+use ChatFlow\Timer\TimerStoreInterface;
 use ChatFlow\View\View;
+use DateInterval;
+use DateTimeImmutable;
+use Psr\Clock\ClockInterface;
 
 /**
  * Everything a handler needs for one inbound event: the event, the conversation, the outbound
@@ -157,6 +163,14 @@ class Context
         return $this->event->getMetadata();
     }
 
+    /**
+     * When the event happened on the platform; see InboundEventInterface::getOccurredAt().
+     */
+    public function getOccurredAt(): DateTimeImmutable
+    {
+        return $this->event->getOccurredAt();
+    }
+
     // -- outbound effects ----------------------------------------------------------------------
 
     public function reply(View|string $view): ReplyEffect
@@ -249,6 +263,70 @@ class Context
         $this->record('side_effect.scheduled', ['effect' => $id, 'handler' => $handler]);
 
         return $effect;
+    }
+
+    // -- timers --------------------------------------------------------------------------------
+
+    /**
+     * Wakes this conversation later: at a point in time, after an interval, or after a number of
+     * seconds counted from now. The wake-up is a system tick (`timer:<reason>`) delivered by
+     * Application::runDue() to the active scene's TimerListenerInterface hook or to the
+     * application's onTimer() listener.
+     *
+     * The request travels as a side effect, so a rolled-back tick schedules nothing. The default
+     * id is `<conversation>:<reason>`: scheduling the same reason again moves the timer instead of
+     * adding a second one.
+     *
+     * @param array<string, mixed> $payload Serializable data handed to the listener
+     *
+     * @throws LogicException When the application has no timer store.
+     */
+    public function wakeAt(DateTimeImmutable|DateInterval|int $when, string $reason, array $payload = [], ?string $id = null): SideEffect
+    {
+        $this->assertTimersAvailable();
+
+        $at = match (true) {
+            $when instanceof DateTimeImmutable => $when,
+            $when instanceof DateInterval => $this->now()->add($when),
+            default => $this->now()->add(new DateInterval('PT' . max(0, $when) . 'S')),
+        };
+
+        $timer = new Timer($id ?? $this->getConversationId() . ':' . $reason, $this->getConversationId(), $at, $reason, $payload);
+
+        return $this->schedule(TimerSideEffectHandler::SCHEDULE, $timer->toArray(), 'timer:schedule:' . $timer->id);
+    }
+
+    /**
+     * Cancels a timer by id, or by reason when the timer was scheduled with the default id.
+     *
+     * @throws LogicException When the application has no timer store.
+     */
+    public function cancelTimer(string $idOrReason): SideEffect
+    {
+        $this->assertTimersAvailable();
+        $id = str_contains($idOrReason, ':') ? $idOrReason : $this->getConversationId() . ':' . $idOrReason;
+
+        return $this->schedule(TimerSideEffectHandler::CANCEL, ['id' => $id], 'timer:cancel:' . $id);
+    }
+
+    private function assertTimersAvailable(): void
+    {
+        if (!$this->container->has(TimerStoreInterface::class)) {
+            throw new LogicException('Timers need a TimerStoreInterface: pass one to the Application constructor.');
+        }
+    }
+
+    private function now(): DateTimeImmutable
+    {
+        if ($this->container->has(ClockInterface::class)) {
+            $clock = $this->container->get(ClockInterface::class);
+
+            if ($clock instanceof ClockInterface) {
+                return $clock->now();
+            }
+        }
+
+        return new DateTimeImmutable();
     }
 
     public function downloadAttachment(string $destinationDir): ?string

@@ -6,6 +6,8 @@ namespace ChatFlow\Event;
 
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Support\SerializableValueValidator;
+use DateTimeImmutable;
+use DateTimeZone;
 
 /**
  * Platform-neutral inbound event. Payload and metadata are normalized once on construction.
@@ -18,6 +20,8 @@ final class InboundEvent implements InboundEventInterface
      * @var array<string, mixed>
      */
     private readonly array $metadata;
+
+    private readonly DateTimeImmutable $occurredAt;
 
     /**
      * @param list<InboundAttachment> $attachments
@@ -32,7 +36,9 @@ final class InboundEvent implements InboundEventInterface
         private readonly array $attachments = [],
         private readonly ?MessageRef $messageRef = null,
         array $metadata = [],
+        ?DateTimeImmutable $occurredAt = null,
     ) {
+        $this->occurredAt = $occurredAt ?? new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $this->actionPayload = SerializableValueValidator::normalize($actionPayload, 'action payload');
         $this->metadata = SerializableValueValidator::normalizeMap($metadata, 'metadata');
     }
@@ -90,5 +96,10 @@ final class InboundEvent implements InboundEventInterface
     public function getMetadata(): array
     {
         return $this->metadata;
+    }
+
+    public function getOccurredAt(): DateTimeImmutable
+    {
+        return $this->occurredAt;
     }
 }

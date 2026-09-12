@@ -20,6 +20,9 @@ Optional constructor arguments:
 - `ValidationRegistry $validationRegistry`
 - `LoggerInterface $logger`
 - `RuntimeObserverInterface $runtimeObserver`
+- `SideEffectRegistry $sideEffects`, `int $sideEffectMaxAttempts` (default 5)
+- `TimerStoreInterface $timers` (default: none, `wakeAt()` throws)
+- `ClockInterface $clock` (default: the system clock)
 
 To use persistent storage and a session TTL, build the manager yourself:
 
@@ -79,6 +82,15 @@ $executed = $application->drain($conversationId);
 
 Work scheduled inside a tick with `$ctx->schedule()` runs after the snapshot is committed; see
 [Side Effects](side-effects.md).
+
+## Timers
+
+```php
+$application->onTimer('digest', $listener);
+$ran = $application->runDue();
+```
+
+See [Timers](timers.md).
 
 ## Adapter Hook
 

@@ -6,6 +6,8 @@ namespace ChatFlow\Event;
 
 use ChatFlow\Contracts\InboundEventInterface;
 use ChatFlow\Support\SerializableValueValidator;
+use DateTimeImmutable;
+use DateTimeZone;
 
 /**
  * An event that did not come from the user: a scheduler, an admin action or another chat acting
@@ -19,6 +21,8 @@ final class SystemEvent implements InboundEventInterface
      */
     private readonly array $metadata;
 
+    private readonly DateTimeImmutable $occurredAt;
+
     /**
      * @param array<string, mixed> $metadata
      */
@@ -27,7 +31,9 @@ final class SystemEvent implements InboundEventInterface
         private readonly ?UserRef $user = null,
         private readonly string $reason = 'system',
         array $metadata = [],
+        ?DateTimeImmutable $occurredAt = null,
     ) {
+        $this->occurredAt = $occurredAt ?? new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $this->metadata = SerializableValueValidator::normalizeMap(['system' => true, 'reason' => $reason] + $metadata, 'metadata');
     }
 
@@ -94,5 +100,10 @@ final class SystemEvent implements InboundEventInterface
     public function getMetadata(): array
     {
         return $this->metadata;
+    }
+
+    public function getOccurredAt(): DateTimeImmutable
+    {
+        return $this->occurredAt;
     }
 }

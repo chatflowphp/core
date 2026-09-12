@@ -5,7 +5,8 @@ A conversation is a state machine from `chatflowphp/automata`:
 - **states** are scenes, plus the built-in root scene where routes run;
 - **context** is the conversation data (`SceneContext`), including scene history and the pending
   interaction;
-- **input** is the inbound event plus the route matched for it;
+- **input** is the inbound event plus the route matched for it; every event carries the time it
+  happened on the platform;
 - **a tick** is the processing of one inbound event;
 - **transitions** are `enter()`, `back()` and `leave()` calls made inside the tick;
 - **the snapshot** is what gets stored between updates.

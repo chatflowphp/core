@@ -10,6 +10,7 @@ adapters. It is responsible for:
 - validation;
 - platform-neutral views and outbound effects;
 - side effects that run after the tick committed;
+- timers that wake a conversation later;
 - runtime observability;
 - serialization rules.
 
@@ -26,16 +27,17 @@ or platform-specific rendering. Those belong to adapters.
 6. [Transitions](transitions.md)
 7. [Views And Effects](views-effects.md)
 8. [Side Effects](side-effects.md)
-9. [Storage](storage.md)
-10. [Streams](streams.md)
-11. [Validation](validation.md)
-12. [Localization](i18n.md)
-13. [Middleware](middleware.md)
-14. [Observability](observability.md)
-15. [Serialization](serialization.md)
-16. [Testing](testing.md)
-17. [Upgrade From 1.x](upgrade-from-1.x.md)
-18. [AI Index](ai-index.md)
+9. [Timers](timers.md)
+10. [Storage](storage.md)
+11. [Streams](streams.md)
+12. [Validation](validation.md)
+13. [Localization](i18n.md)
+14. [Middleware](middleware.md)
+15. [Observability](observability.md)
+16. [Serialization](serialization.md)
+17. [Testing](testing.md)
+18. [Upgrade From 1.x](upgrade-from-1.x.md)
+19. [AI Index](ai-index.md)
 
 ## Using This Through An Adapter?
 
@@ -58,6 +60,7 @@ adapter authors.
 - `ChatFlow\I18n\TranslatorInterface`, `ArrayTranslator`, `LocaleResolverInterface`
 - `ChatFlow\Outbound\ReplyEffect`, `RenderEffect`, `AckEffect`
 - `ChatFlow\SideEffect\SideEffect`, `SideEffectHandlerInterface`, `SideEffectListenerInterface`
+- `ChatFlow\Timer\Timer`, `TimerStoreInterface`, `TimerListenerInterface`
 - `ChatFlow\Platform\PlatformCapabilities`
 
 ## Design Rules
