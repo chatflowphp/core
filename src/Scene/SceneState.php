@@ -55,7 +55,7 @@ final class SceneState implements StateInterface
         $ctx = $input->getContext();
         $route = $input->getRoute();
 
-        if ($route !== null && $route->isGlobal() && $this->scene->allowsGlobalRoutes()) {
+        if ($route !== null && $route->isGlobal() && ($ctx->isSystem() || $this->scene->allowsGlobalRoutes())) {
             $this->routes->dispatch($route, $ctx);
 
             return CycleResponse::fromEvent(new RouteHandled($route->getType(), $route->getPattern(), true, $this->getId()));

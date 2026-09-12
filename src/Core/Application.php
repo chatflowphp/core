@@ -359,7 +359,7 @@ class Application implements FlowRuntimeInterface
         $ticked = false;
         $result = (new Pipeline($this->container))
             ->send($context)
-            ->through($this->collectMiddlewareStack($conversation, $route))
+            ->through($this->collectMiddlewareStack($context, $conversation, $route))
             ->then(function (Context $ctx) use ($conversation, $route, &$ticked): Result {
                 $ticked = true;
 
@@ -487,7 +487,7 @@ class Application implements FlowRuntimeInterface
     /**
      * @return list<MiddlewareInterface|class-string<MiddlewareInterface>>
      */
-    private function collectMiddlewareStack(Conversation $conversation, ?Route $route): array
+    private function collectMiddlewareStack(Context $context, Conversation $conversation, ?Route $route): array
     {
         $stack = $this->middlewares;
         $sceneId = $conversation->getCurrentScene();
@@ -497,7 +497,7 @@ class Application implements FlowRuntimeInterface
             $stack = [...$stack, ...$scene->getMiddlewares()];
         }
 
-        if ($route !== null && ($scene === null || ($route->isGlobal() && $scene->allowsGlobalRoutes()))) {
+        if ($route !== null && ($scene === null || ($route->isGlobal() && ($context->isSystem() || $scene->allowsGlobalRoutes())))) {
             $stack = [...$stack, ...$route->getMiddlewares()];
         }
 

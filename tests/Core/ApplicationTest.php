@@ -18,6 +18,7 @@ use ChatFlow\Routing\Route;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Tests\Support\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
+use ChatFlow\Tests\Support\Scenes\CheckoutScene;
 use ChatFlow\Tests\Support\Scenes\MenuScene;
 use ChatFlow\Tests\Support\TestApp;
 use ChatFlow\Tests\Support\TraceRuntimeObserver;
@@ -439,6 +440,28 @@ final class ApplicationTest extends TestCase
         self::assertInstanceOf(Route::class, $route);
         self::assertSame(Route::TEXT_PREFIX, $route->getType());
         self::assertSame('', $argument, 'Only command routes have an argument.');
+    }
+
+    public function testSystemTicksReachScenesThatRefuseGlobalRoutes(): void
+    {
+        $container = new Container();
+        $log = new HookLog();
+        $container->set(HookLog::class, $log);
+        $adapter = new FakePlatformAdapter();
+        $application = TestApp::create($adapter, container: $container);
+        $application->registerScene(CheckoutScene::class);
+        $application->enter('conv-1', 'checkout');
+        $repliesBefore = \count($adapter->replies);
+
+        $result = $application->run('conv-1', static function (Context $ctx): void {
+            $ctx->reply('from the scheduler');
+        }, 'report');
+
+        self::assertTrue($result->isSuccess());
+        self::assertCount($repliesBefore + 1, $adapter->replies, 'The system handler ran although the scene refuses global routes.');
+        self::assertSame('from the scheduler', $adapter->replies[$repliesBefore]->getText());
+        self::assertSame('checkout', $application->getConversations()->resume('conv-1')->getCurrentScene());
+        self::assertNotContains('Checkout:cancel', $log->all());
     }
 
     public function testOutsideRequestEntryCanCarryPlatformFactsInTheConversationReference(): void
