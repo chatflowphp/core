@@ -6,6 +6,32 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- Append-only streams: `StreamStorageInterface` with `MemoryStreamStorage`, `FileStreamStorage`,
+  `RedisStreamStorage` and `DatabaseStreamStorage`, positions from 1, range reads and
+  deduplication by id. For message history, journals and audit trails. See `docs/streams.md`.
+- Side effects: `Context::schedule()` records work in the snapshot; it runs after the tick
+  committed, survives crashes, is retried and abandoned after `sideEffectMaxAttempts`, and hands
+  its result back through `SideEffectListenerInterface` on the scene or
+  `Application::onSideEffect()`. `Application::drain()` for workers. See `docs/side-effects.md`.
+- Event time: `InboundEventInterface::getOccurredAt()` and `Context::getOccurredAt()`.
+- Timers: `Context::wakeAt()` / `cancelTimer()`, `TimerStoreInterface` with memory, file, Redis
+  and database stores, `TimerListenerInterface`, `Application::onTimer()` and `runDue()`.
+  See `docs/timers.md`.
+- `ChatFlow\Testing\ApplicationTester` and `FakePlatformAdapter` (moved from the test suite);
+  `Platform\ListeningPlatformAdapter` runs an application in the shadow of a live bot.
+  See `docs/testing.md`.
+- Long turns: `Context::getTickCount()` and `Application::run(..., expectedTick:)`, which answers
+  `conversation_moved` instead of applying a stale result. See `docs/long-turns.md`.
+- `Application` registers itself as `FlowRuntimeInterface` and the clock as `ClockInterface` in
+  the container; `ClockInterface $clock` is a constructor argument.
+
+### Fixed
+
+- `Application::run()` reaches scenes that return `false` from `allowsGlobalRoutes()`: system
+  ticks always run their handler instead of being fed to the scene as empty input.
+
 ## [2.0.0-rc1] - 2026-09-12
 
 A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are

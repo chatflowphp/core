@@ -95,6 +95,9 @@ Sending `/start` while `PhoneScene` is active runs the command and keeps the sce
 3. Route handlers and scenes reply through `Context`: `reply()`, `render()`, `ack()`. Effects are
    queued and delivered by the adapter only after the tick committed.
 4. The conversation snapshot is written back through `StorageInterface`.
+5. Work that must not run inside the tick (a refund, a model call) is scheduled with
+   `$ctx->schedule()` and executed after the commit; `$ctx->wakeAt()` arms a timer for later.
+   Growing data such as the message history goes to append-only streams.
 
 ## Serialization Rules
 
