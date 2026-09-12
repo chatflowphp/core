@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ChatFlow\Tests\Support;
+namespace ChatFlow\Testing;
 
 use ChatFlow\Contracts\AfterHandleInterface;
 use ChatFlow\Contracts\InboundEventInterface;
@@ -17,7 +17,11 @@ use ChatFlow\Outbound\ReplyEffect;
 use ChatFlow\Platform\PlatformCapabilities;
 use InvalidArgumentException;
 
-final class FakePlatformAdapter implements PlatformAdapterInterface, AfterHandleInterface
+/**
+ * Platform adapter for tests: accepts ready-made inbound events, records every delivered effect
+ * and declares full capabilities. Pass `failEffectType` to simulate a delivery failure.
+ */
+class FakePlatformAdapter implements PlatformAdapterInterface, AfterHandleInterface
 {
     /** @var list<array{conversation: string, status: string}> */
     public array $afterHandle = [];
@@ -37,10 +41,27 @@ final class FakePlatformAdapter implements PlatformAdapterInterface, AfterHandle
     /** @var list<string> */
     public array $downloads = [];
 
+    /** @var list<array{conversation: string, effect: OutboundEffectInterface}> */
+    public array $effects = [];
+
     public function __construct(
         private readonly ?PlatformCapabilities $platformCapabilities = null,
         private readonly ?string $failEffectType = null,
     ) {}
+
+    /**
+     * Forgets everything recorded so far.
+     */
+    public function clear(): void
+    {
+        $this->afterHandle = [];
+        $this->deliveries = [];
+        $this->replies = [];
+        $this->renders = [];
+        $this->acks = [];
+        $this->downloads = [];
+        $this->effects = [];
+    }
 
     public function createInboundEvent(mixed $input): InboundEventInterface
     {
@@ -54,6 +75,7 @@ final class FakePlatformAdapter implements PlatformAdapterInterface, AfterHandle
     public function deliver(Context $context, OutboundEffectInterface $effect): DeliveryResult
     {
         $this->deliveries[] = $effect->getType();
+        $this->effects[] = ['conversation' => $context->getConversationId(), 'effect' => $effect];
 
         if ($this->failEffectType === $effect->getType()) {
             return DeliveryResult::error('forced delivery failure');

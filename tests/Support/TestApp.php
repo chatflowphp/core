@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ChatFlow\Tests\Support;
 
 use ChatFlow\Container\Container;
+use ChatFlow\Contracts\PlatformAdapterInterface;
 use ChatFlow\Core\Application;
 use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundAttachment;
@@ -16,6 +17,7 @@ use ChatFlow\Scene\SceneRegistry;
 use ChatFlow\Scene\SceneTransitions;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Storage\StorageInterface;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Timer\TimerStoreInterface;
 use ChatFlow\Validation\ValidationRegistry;
 use Psr\Clock\ClockInterface;
@@ -26,7 +28,7 @@ use Psr\Clock\ClockInterface;
 final class TestApp
 {
     public static function create(
-        ?FakePlatformAdapter $adapter = null,
+        ?PlatformAdapterInterface $adapter = null,
         ?StorageInterface $storage = null,
         ?RuntimeObserverInterface $observer = null,
         ?Container $container = null,

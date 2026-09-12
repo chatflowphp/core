@@ -9,7 +9,7 @@ use ChatFlow\Middleware\RateLimitMiddleware;
 use ChatFlow\Storage\Drivers\FileStorage;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Storage\StorageInterface;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\TestApp;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;

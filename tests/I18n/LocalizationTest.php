@@ -14,7 +14,7 @@ use ChatFlow\I18n\SessionLocaleResolver;
 use ChatFlow\I18n\SymfonyTranslatorAdapter;
 use ChatFlow\I18n\TranslatorInterface;
 use ChatFlow\Middleware\LocaleMiddleware;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\TestApp;
 use ChatFlow\View\View;
 use PHPUnit\Framework\TestCase;

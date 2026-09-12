@@ -10,7 +10,7 @@ use ChatFlow\Exception\ContainerException;
 use ChatFlow\Exception\LogicException;
 use ChatFlow\Middleware\MiddlewareInterface;
 use ChatFlow\Middleware\Pipeline;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\TestApp;
 use PHPUnit\Framework\TestCase;

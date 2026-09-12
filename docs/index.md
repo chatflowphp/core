@@ -61,7 +61,8 @@ adapter authors.
 - `ChatFlow\Outbound\ReplyEffect`, `RenderEffect`, `AckEffect`
 - `ChatFlow\SideEffect\SideEffect`, `SideEffectHandlerInterface`, `SideEffectListenerInterface`
 - `ChatFlow\Timer\Timer`, `TimerStoreInterface`, `TimerListenerInterface`
-- `ChatFlow\Platform\PlatformCapabilities`
+- `ChatFlow\Platform\PlatformCapabilities`, `ListeningPlatformAdapter`
+- `ChatFlow\Testing\ApplicationTester`, `FakePlatformAdapter`
 
 ## Design Rules
 

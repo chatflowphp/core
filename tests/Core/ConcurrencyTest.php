@@ -8,7 +8,7 @@ use ChatFlow\Core\Application;
 use ChatFlow\Core\Context;
 use ChatFlow\Storage\Drivers\MemoryStorage;
 use ChatFlow\Storage\StorageInterface;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\RacingMiddleware;
 use ChatFlow\Tests\Support\TestApp;
 use ChatFlow\Tests\Support\TraceRuntimeObserver;

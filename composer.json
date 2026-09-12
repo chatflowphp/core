@@ -41,6 +41,7 @@
         "symfony/translation-contracts": "^3.0"
     },
     "suggest": {
+        "phpunit/phpunit": "Required by ChatFlow\\Testing\\ApplicationTester.",
         "ext-pdo": "Required for PDO-backed session storage.",
         "ext-redis": "Required for Redis-based session storage.",
         "symfony/translation-contracts": "Required by SymfonyTranslatorAdapter to reuse an existing symfony/translation catalogue."

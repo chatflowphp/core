@@ -9,7 +9,7 @@ use ChatFlow\Core\Context;
 use ChatFlow\SideEffect\SideEffect;
 use ChatFlow\SideEffect\SideEffectHandlerInterface;
 use ChatFlow\Storage\Drivers\MemoryStorage;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\Scenes\OrderScene;
 use ChatFlow\Tests\Support\TestApp;

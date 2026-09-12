@@ -12,7 +12,7 @@ use ChatFlow\Event\InboundAttachment;
 use ChatFlow\Scene\RootScene;
 use ChatFlow\Scene\SceneContext;
 use ChatFlow\Storage\Drivers\MemoryStorage;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\MutableClock;
 use ChatFlow\Tests\Support\Scenes\BrokenScene;

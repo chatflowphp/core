@@ -10,7 +10,7 @@ use ChatFlow\Exception\LogicException;
 use ChatFlow\Exception\SceneException;
 use ChatFlow\Scene\Interaction;
 use ChatFlow\Scene\SceneContext;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\TestApp;
 use PHPUnit\Framework\TestCase;
 

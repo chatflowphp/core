@@ -16,7 +16,7 @@ use ChatFlow\Outbound\OutboundEffectInterface;
 use ChatFlow\Platform\PlatformCapabilities;
 use ChatFlow\Routing\Route;
 use ChatFlow\Storage\Drivers\MemoryStorage;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\Scenes\CheckoutScene;
 use ChatFlow\Tests\Support\Scenes\MenuScene;

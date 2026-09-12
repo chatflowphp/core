@@ -10,7 +10,7 @@ use ChatFlow\Core\Context;
 use ChatFlow\Event\ConversationRef;
 use ChatFlow\Event\InboundEvent;
 use ChatFlow\Exception\LogicException;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\HookLog;
 use ChatFlow\Tests\Support\Scenes\ReminderScene;
 use ChatFlow\Tests\Support\TestApp;

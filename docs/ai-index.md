@@ -52,6 +52,12 @@ final class PhoneScene extends BaseScene
 }
 ```
 
+## Testing
+
+`ApplicationTester` (needs phpunit) drives a flow: `send()`, `press()`, `travel()` for timers,
+`assertReplied()`, `assertScene()`, `assertSessionHas()`, `assertSideEffectPending()`,
+`assertTimerScheduled()`. Build the application on `FakePlatformAdapter`.
+
 ## Rules
 
 - Register scenes before entering them: `$runtime->registerScene(PhoneScene::class)`.

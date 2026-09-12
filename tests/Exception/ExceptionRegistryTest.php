@@ -9,7 +9,7 @@ use ChatFlow\Core\Context;
 use ChatFlow\Exception\BotException;
 use ChatFlow\Exception\ExceptionRegistry;
 use ChatFlow\Exception\UserFriendlyException;
-use ChatFlow\Tests\Support\FakePlatformAdapter;
+use ChatFlow\Testing\FakePlatformAdapter;
 use ChatFlow\Tests\Support\TestApp;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
