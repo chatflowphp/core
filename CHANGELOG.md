@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [2.0.0-rc1] - 2026-09-12
+
+A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are
+states, every inbound event is one tick. There is no backward compatibility with 1.x; see
+`docs/upgrade-from-1.x.md`.
+
 ### Added
 
 - `Context::getRoute()` and `Context::getCommandArgument()`, plus `Route::commandArgument()`:
@@ -21,14 +27,6 @@ All notable changes to this project are documented in this file. The format foll
   locale resolution through `LocaleResolverInterface`, `SessionLocaleResolver` and
   `ChainLocaleResolver`, `Middleware\LocaleMiddleware`, and `Context::t()` / `getLocale()` /
   `setLocale()`. See `docs/i18n.md`.
-
-## [2.0.0] - 2026-09-10
-
-A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are
-states, every inbound event is one tick. There is no backward compatibility with 1.x; see
-`docs/upgrade-from-1.x.md`.
-
-### Added
 
 - `ChatFlow\Scene` namespace: `BaseScene`, `RootScene`, `SceneContext`, `SceneRegistry`,
   `SceneTransitions`, `Conversation`, `ConversationManager`, `ConversationStore`, `Interaction`.
