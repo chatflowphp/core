@@ -14,9 +14,6 @@ use ChatFlow\Event\SystemEvent;
 use ChatFlow\Event\UserRef;
 use ChatFlow\Exception\LogicException;
 use ChatFlow\Scene\Conversation;
-use ChatFlow\Scene\RootScene;
-use ChatFlow\SideEffect\SideEffect;
-use ChatFlow\Timer\Timer;
 use ChatFlow\View\View;
 use DateInterval;
 use DateTimeImmutable;
@@ -31,6 +28,8 @@ use PHPUnit\Framework\Assert;
  */
 final class ApplicationTester
 {
+    private ConversationAssertions $state;
+
     private ?Result $lastResult = null;
 
     private ?DateTimeImmutable $occurredAt = null;
@@ -41,7 +40,9 @@ final class ApplicationTester
         private string $conversationId = 'conv-1',
         private string|int|null $userId = 1,
         private readonly ?FrozenClock $clock = null,
-    ) {}
+    ) {
+        $this->state = new ConversationAssertions($this->application, $this->conversationId);
+    }
 
     // -- driving -------------------------------------------------------------------------------
 
@@ -52,6 +53,7 @@ final class ApplicationTester
     {
         $this->conversationId = $conversationId;
         $this->userId = $userId ?? $conversationId;
+        $this->state = new ConversationAssertions($this->application, $this->conversationId);
 
         return $this;
     }
@@ -92,6 +94,7 @@ final class ApplicationTester
     public function dispatch(InboundEvent|SystemEvent $event): self
     {
         $this->lastResult = $this->application->handle($event);
+        $this->state->recordResult($this->lastResult);
 
         return $this;
     }
@@ -126,6 +129,7 @@ final class ApplicationTester
     {
         $this->adapter->clear();
         $this->lastResult = null;
+        $this->state->recordResult(null);
 
         return $this;
     }
@@ -134,12 +138,12 @@ final class ApplicationTester
 
     public function conversation(): ConversationRef
     {
-        return new ConversationRef($this->conversationId);
+        return $this->state->conversation();
     }
 
     public function resume(): Conversation
     {
-        return $this->application->getConversations()->resume($this->conversationId);
+        return $this->state->resume();
     }
 
     public function getLastResult(): ?Result
@@ -231,38 +235,45 @@ final class ApplicationTester
 
     public function assertResult(string $status, ?string $message = null): self
     {
-        Assert::assertNotNull($this->lastResult, 'No event was dispatched yet.');
-        Assert::assertSame($status, $this->lastResult->getStatus());
-
-        if ($message !== null) {
-            Assert::assertSame($message, $this->lastResult->getMessage());
-        }
+        $this->state->assertResult($status, $message);
 
         return $this;
     }
 
     public function assertScene(string $scene): self
     {
-        $expected = $scene === RootScene::ID ? $scene : $this->application->getScenes()->resolveId($scene);
-        Assert::assertSame($expected, $this->resume()->getCurrentScene());
+        $this->state->assertScene($scene);
 
         return $this;
     }
 
     public function assertNotInScene(): self
     {
-        Assert::assertFalse($this->resume()->inScene(), 'Expected the conversation in the root scene.');
+        $this->state->assertNotInScene();
+
+        return $this;
+    }
+
+    public function assertScenePending(string $scene): self
+    {
+        $this->state->assertScenePending($scene);
+
+        return $this;
+    }
+
+    public function assertNoScenePending(): self
+    {
+        $this->state->assertNoScenePending();
 
         return $this;
     }
 
     public function assertSessionHas(string $key, mixed $expected = null): self
     {
-        $session = $this->resume()->getContext();
-        Assert::assertTrue($session->has($key), \sprintf('Session key "%s" is missing.', $key));
-
-        if (\func_num_args() === 2) {
-            Assert::assertSame($expected, $session->get($key));
+        if (\func_num_args() >= 2) {
+            $this->state->assertSessionHas($key, $expected);
+        } else {
+            $this->state->assertSessionHas($key);
         }
 
         return $this;
@@ -270,48 +281,42 @@ final class ApplicationTester
 
     public function assertSessionMissing(string $key): self
     {
-        Assert::assertFalse($this->resume()->getContext()->has($key), \sprintf('Session key "%s" should be missing.', $key));
+        $this->state->assertSessionMissing($key);
 
         return $this;
     }
 
     public function assertSideEffectPending(string $handler): self
     {
-        Assert::assertContains($handler, $this->pendingHandlers(), \sprintf('No pending side effect for "%s".', $handler));
+        $this->state->assertSideEffectPending($handler);
 
         return $this;
     }
 
     public function assertNoSideEffectsPending(): self
     {
-        Assert::assertSame([], $this->pendingHandlers(), 'Side effects are still pending.');
+        $this->state->assertNoSideEffectsPending();
 
         return $this;
     }
 
     public function assertSideEffectFailed(string $handler): self
     {
-        $failed = array_map(static fn(SideEffect $effect): string => $effect->handler, $this->resume()->getContext()->getFailedSideEffects());
-        Assert::assertContains($handler, $failed, \sprintf('No failed side effect for "%s".', $handler));
+        $this->state->assertSideEffectFailed($handler);
 
         return $this;
     }
 
     public function assertTimerScheduled(string $reason, ?DateTimeImmutable $at = null): self
     {
-        $timer = $this->timer($reason);
-        Assert::assertNotNull($timer, \sprintf('No timer with reason "%s" is scheduled.', $reason));
-
-        if ($at !== null) {
-            Assert::assertSame($at->getTimestamp(), $timer->at->getTimestamp());
-        }
+        $this->state->assertTimerScheduled($reason, $at);
 
         return $this;
     }
 
     public function assertNoTimer(string $reason): self
     {
-        Assert::assertNull($this->timer($reason), \sprintf('A timer with reason "%s" is scheduled.', $reason));
+        $this->state->assertNoTimer($reason);
 
         return $this;
     }
@@ -332,30 +337,5 @@ final class ApplicationTester
         }
 
         return false;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function pendingHandlers(): array
-    {
-        return array_map(static fn(SideEffect $effect): string => $effect->handler, $this->resume()->getContext()->getSideEffects());
-    }
-
-    private function timer(string $reason): ?Timer
-    {
-        $timers = $this->application->getTimers();
-
-        if ($timers === null) {
-            return null;
-        }
-
-        foreach ($timers->forConversation($this->conversationId) as $timer) {
-            if ($timer->reason === $reason) {
-                return $timer;
-            }
-        }
-
-        return null;
     }
 }
