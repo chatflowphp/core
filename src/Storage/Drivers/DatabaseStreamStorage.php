@@ -118,10 +118,6 @@ class DatabaseStreamStorage implements StreamStorageInterface
         $records = [];
 
         while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
-            if (!\is_array($row)) {
-                continue;
-            }
-
             $record = $this->decode($row);
 
             if ($record !== null) {
@@ -148,10 +144,14 @@ class DatabaseStreamStorage implements StreamStorageInterface
     }
 
     /**
-     * @param array<array-key, mixed> $row
+     * A row as the driver returned it; anything that is not a well-formed record is skipped.
      */
-    private function decode(array $row): ?StreamRecord
+    private function decode(mixed $row): ?StreamRecord
     {
+        if (!\is_array($row)) {
+            return null;
+        }
+
         $seq = $row['seq'] ?? null;
         $raw = $row['record_data'] ?? null;
 

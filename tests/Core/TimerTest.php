@@ -85,8 +85,9 @@ final class TimerTest extends TestCase
         });
         $application->leave('conv-1');
         $application->handle(TestApp::event('conv-1', '/boom'));
+        $afterRollback = $timers->forConversation('conv-1');
 
-        self::assertSame([], $timers->forConversation('conv-1'));
+        self::assertSame([], $afterRollback, 'A tick that failed schedules nothing.');
     }
 
     public function testTheApplicationListenerReceivesTimersOutsideScenesAndUnhandledOnesAreDropped(): void
