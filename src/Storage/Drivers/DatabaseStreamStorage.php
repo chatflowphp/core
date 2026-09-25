@@ -45,8 +45,11 @@ class DatabaseStreamStorage implements StreamStorageInterface
     }
 
     /**
-     * The id lookup, the position and the insert happen inside one transaction; on MySQL and
-     * PostgreSQL the last row is locked with `FOR UPDATE`, SQLite uses `BEGIN IMMEDIATE`.
+     * The id lookup, the position and the insert happen inside one transaction that holds the
+     * stream: MySQL locks the scanned range with `FOR UPDATE`, SQLite uses `BEGIN IMMEDIATE`, and
+     * PostgreSQL — which refuses `FOR UPDATE` next to an aggregate — takes a transaction-scoped
+     * advisory lock on the stream key. The lock also covers the first append to an empty stream,
+     * where there is no row to lock.
      */
     public function append(string $stream, array $data, ?string $id = null): int
     {
@@ -57,6 +60,11 @@ class DatabaseStreamStorage implements StreamStorageInterface
 
         try {
             $owns = $this->begin($driver);
+
+            if ($driver === 'pgsql') {
+                $lock = $this->prepare('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))');
+                $lock->execute([$this->table . ':' . $stream]);
+            }
 
             if ($id !== null) {
                 $existing = $this->prepare(\sprintf('SELECT seq FROM %s WHERE stream_key = ? AND dedupe_id = ?', $this->table));
@@ -71,7 +79,7 @@ class DatabaseStreamStorage implements StreamStorageInterface
             }
 
             $select = \sprintf('SELECT MAX(seq) FROM %s WHERE stream_key = ?', $this->table)
-                . ($driver === 'sqlite' ? '' : ' FOR UPDATE');
+                . ($driver === 'mysql' ? ' FOR UPDATE' : '');
             $statement = $this->prepare($select);
             $statement->execute([$stream]);
             $max = $statement->fetchColumn();

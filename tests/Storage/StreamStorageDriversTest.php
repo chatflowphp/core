@@ -120,6 +120,43 @@ final class StreamStorageDriversTest extends TestCase
 
             return new DatabaseStreamStorage($pdo);
         }];
+
+        // PostgreSQL runs when a server is given, e.g.
+        // CHATFLOW_TEST_PGSQL_DSN='pgsql:host=127.0.0.1;port=5432;dbname=chatflow_test;user=u;password=p'
+        $dsn = getenv('CHATFLOW_TEST_PGSQL_DSN');
+
+        if (\is_string($dsn) && $dsn !== '') {
+            yield 'pgsql' => [static function () use ($dsn): StreamStorageInterface {
+                $pdo = new PDO($dsn, options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                $table = 'chatflow_streams_' . bin2hex(random_bytes(4));
+                $pdo->exec(DatabaseStreamStorage::createTableSql('pgsql', $table));
+
+                return new DatabaseStreamStorage($pdo, $table);
+            }];
+        }
+    }
+
+    public function testAppendInsideAnOpenTransactionOnPostgresql(): void
+    {
+        $dsn = getenv('CHATFLOW_TEST_PGSQL_DSN');
+
+        if (!\is_string($dsn) || $dsn === '') {
+            self::markTestSkipped('Set CHATFLOW_TEST_PGSQL_DSN to run against PostgreSQL.');
+        }
+
+        $pdo = new PDO($dsn, options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $table = 'chatflow_streams_' . bin2hex(random_bytes(4));
+        $pdo->exec(DatabaseStreamStorage::createTableSql('pgsql', $table));
+        $storage = new DatabaseStreamStorage($pdo, $table);
+
+        // The caller's transaction owns the commit; the append joins it.
+        $pdo->beginTransaction();
+        self::assertSame(1, $storage->append('s', ['n' => 1]));
+        self::assertSame(2, $storage->append('s', ['n' => 2]));
+        $pdo->commit();
+
+        self::assertSame(2, $storage->last('s'));
+        $pdo->exec(\sprintf('DROP TABLE %s', $table));
     }
 
     public function testCorruptedLinesAreSkippedAndTheIndexSurvives(): void

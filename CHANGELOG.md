@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- `DatabaseStreamStorage::append()` on PostgreSQL. It selected `MAX(seq) … FOR UPDATE`, which
+  PostgreSQL refuses ("FOR UPDATE is not allowed with aggregate functions"), so no append to a
+  stream ever succeeded there. Appends to one stream are now serialised with a
+  transaction-scoped advisory lock on the stream key, which also covers the first append to an
+  empty stream; MySQL and SQLite are unchanged. The test suite runs the stream drivers against
+  PostgreSQL when `CHATFLOW_TEST_PGSQL_DSN` is set.
+
 ## [2.0.0] - 2026-09-12
 
 A rewrite on top of `chatflowphp/automata` 2.0. Conversations are state machines: scenes are
